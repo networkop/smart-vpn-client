@@ -46,6 +46,7 @@ func (c *Health) Start(out chan bool, in chan bool) {
 		select {
 		case <-in:
 			c.baseline = 0
+			time.Sleep(time.Duration(c.interval) * time.Second)
 			client := http.Client{
 				Timeout:   maxWait,
 				Transport: http.DefaultTransport.(*http.Transport).Clone(),
