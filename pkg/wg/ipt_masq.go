@@ -15,7 +15,6 @@ func iptablesNat() *util.Command {
 
 // EnsureMasquerade iptable rules are set up
 func (t *Tunnel) EnsureMasquerade() error {
-	t.delIPtables()
 
 	if _, err := t.getIPtables(); err != nil {
 		_, err := t.addIPtables()
@@ -60,6 +59,10 @@ func (t *Tunnel) addIPtables() (string, error) {
 }
 
 func (t *Tunnel) delIPtables() (string, error) {
+	if _, err := t.getIPtables(); err != nil {
+		return "", err
+	}
+
 	ipt := iptablesNat()
 	ipt.
 		With("-D").

@@ -16,9 +16,11 @@ ARG TARGETARCH
 
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -o smart-vpn-client .
 
-FROM gcr.io/distroless/static:nonroot
+FROM alpine:latest
+
+RUN apk add --no-cache iptables
+
 WORKDIR /
 COPY --from=builder /src/smart-vpn-client .
-USER nonroot:nonroot
 
 ENTRYPOINT ["/smart-vpn-client"]

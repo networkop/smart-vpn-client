@@ -108,8 +108,19 @@ func (t *Tunnel) delLocalRule() error {
 }
 
 func (t *Tunnel) delRules() error {
-	if err := t.delDefaultRule(); err == nil {
-		return t.delLocalRule()
+	var returnErr error
+	if defaultRule := t.getDefaultRule(); defaultRule != nil {
+		err := t.delDefaultRule()
+		if err != nil {
+			returnErr = fmt.Errorf("Failed to delDefaultRule: %s", err)
+		}
 	}
-	return nil
+	if localRule := t.getLocalRule(); localRule != nil {
+		err := t.delLocalRule()
+		if err != nil {
+			returnErr = fmt.Errorf("%w; Failed to delLocalRule: %s", returnErr, err)
+		}
+	}
+
+	return returnErr
 }

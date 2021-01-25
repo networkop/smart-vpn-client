@@ -25,6 +25,7 @@ func (t *Tunnel) getWgLink() netlink.Link {
 }
 
 func (t *Tunnel) delWgLink() error {
+	logrus.Debugf("delWgLink %s", t.intfName)
 	err := netlink.LinkDel(t.link)
 	if err != nil {
 		return err

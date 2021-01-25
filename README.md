@@ -37,6 +37,40 @@ The binary requires `NET_ADMIN` capabilities in order to set up interfaces and m
 sudo VPN_PWD=<VPN_PASSWORD> ./smart-vpn-client -user <VPN_USERNAME>
 ```
 
+## Using Docker
+
+Build your own docker image with:
+
+```
+DOCKER_IMAGE=<YOUR_IMAGE_NAME:TAG> make docker
+```
+
+Alternatively, pull a pre-built docker image from dockerhub:
+
+```
+docker pull networkop/smart-vpn-client:latest
+```
+
+Start a smart vpn client process:
+
+```
+docker run -e VPN_PWD=<VPN_PASS> -d --restart=always --name vpn --net=host --cap-add=NET_ADMIN networkop/smart-vpn-client -user <VPN_USER>
+```
+
+To cleanup all config, first stop the container with `docker rm -f vpn` and then do:
+
+```
+docker run --net=host --cap-add=NET_ADMIN networkop/smart-vpn-client -cleanup
+```
+
+The last command will run to completion and the container will stop.
+
+To view the container logs at any stage do:
+
+```
+docker logs vpn
+```
+
 ## Manual build
 
 Clone this repo and run: 

@@ -52,8 +52,8 @@ func Run() error {
 	} else {
 		secret = os.Getenv(passwordEnvVar)
 	}
-	if secret == "" {
-		return fmt.Errorf("VPN Password must be provided")
+	if (secret == "" || *vpnUser == "") && !*cleanup {
+		return fmt.Errorf("VPN Username and Password must be provided")
 	}
 
 	var client vpn.Provider
