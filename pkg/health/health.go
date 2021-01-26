@@ -74,7 +74,7 @@ func (c *Health) Start(out chan bool, in chan bool) {
 				logrus.Infof("Failed health check: %s", err)
 				out <- false
 			} else if c.healthDegraded() {
-				logrus.Infof("Degraded health check for baseline %d: %+v", c.baseline, c.lastTen)
+				logrus.Infof("Degraded health check for baseline %d ms: %+v", (c.baseline / time.Millisecond), c.lastTen)
 				out <- false
 			} else {
 				logrus.Debugf("Health check successful, nothing to do...")
@@ -98,13 +98,13 @@ func (c *Health) healthDegraded() bool {
 		return false
 	}
 	var sum, avg float64
-	for _, l := range c.lastTen {
-		sum += float64(l)
+	for i, l := range c.lastTen {
+		sum += (float64(l) / float64(i+1))
 	}
 
-	avg = sum / 10
+	avg = sum / float64(len(c.lastTen))
 
-	if avg > 2*float64(c.baseline) {
+	if avg > 4*float64(c.baseline) {
 		return true
 	}
 
