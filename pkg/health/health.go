@@ -106,7 +106,7 @@ func (c *Health) healthDegraded() bool {
 	}
 	var numerator, denominator, result float64
 
-	logrus.Infof("Last Ten latencies: %+v", c.lastTen)
+	logrus.Debugf("Last Ten latencies: %+v", c.lastTen)
 	for i := len(c.lastTen) - 1; i >= 0; i-- {
 		step := len(c.lastTen) - i - 1
 
@@ -117,7 +117,7 @@ func (c *Health) healthDegraded() bool {
 
 	result = numerator / denominator
 	metrics.LastTenAverage.Set(result)
-	logrus.Infof("Weighted Average:%.2f", result)
+	logrus.Debugf("Weighted Average:%.2f", result)
 
 	threshold := float64(10 * c.baseline)
 	metrics.DegradationLevel.Set(threshold)
