@@ -5,7 +5,7 @@ Performs all the standard functions of a VPN client, i.e. manages a connection t
 * Automatic discovery and probing of all available VPN headends. The client will connect to the headend with the lowest round-trip time.
 * Automatic management of routing and NAT masquerade rules required for a VPN client.
 * Periodic VPN connection healthchecks - if more than 3 consecutive healthchecks fail, connection is automatically re-established.
-* VPN connection QoS tracking -- takes a baseline round-trip time measurement when a new connection is established and triggers reconnect when the average latency exceeds 2 x baseline.
+* VPN connection QoS tracking -- takes a baseline round-trip time measurement when a new connection is established and triggers reconnect when the weighted average latency exceeds 10 x baseline for 3 consecutive measurements.
 
 
 ## Supported Providers
@@ -69,6 +69,20 @@ To view the container logs at any stage do:
 
 ```
 docker logs vpn
+```
+
+## Monitor
+
+By default, all healthchecks metrics are exposed on `localhost:2112/metrics` and can be scraped with Grafana Agent (or Prometheus) like this:
+
+```
+prometheus:
+  configs:
+      scrape_configs:
+      - job_name: vpn
+        scrape_interval: 5s
+        static_configs:
+        - targets: ['localhost:2112']
 ```
 
 ## Manual build
