@@ -22,19 +22,26 @@ type Client struct {
 	wg             *wg.Tunnel
 	measureInt     int
 	maxFailed      int
+	ignores        map[string]struct{}
 	measureMaxWait time.Duration
 	maxBestLatency time.Duration
 	winner         *region
 }
 
 // NewClient returns new PIA client
-func NewClient(user, pwd string, measureInt, maxFailed int) (*Client, error) {
+func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string) (*Client, error) {
+
+	ignoresMap := make(map[string]struct{})
+	for _, ignore := range ignores {
+		ignoresMap[ignore] = struct{}{}
+	}
 
 	return &Client{
 		http:           http.Client{Timeout: time.Second * 2},
 		user:           user,
 		pwd:            pwd,
 		measureInt:     measureInt,
+		ignores:        ignoresMap,
 		measureMaxWait: defaultMeasureMaxWait,
 		maxBestLatency: defaultMaxBestLatency,
 		maxFailed:      maxFailed,

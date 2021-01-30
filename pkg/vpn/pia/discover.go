@@ -74,8 +74,17 @@ func (c *Client) Discover() error {
 
 	c.Headends = make(map[string]*region)
 	for _, region := range payload.Regions {
-		c.Headends[region.ID] = region
+		if !c.isIgnored(region) {
+			c.Headends[region.ID] = region
+		}
 	}
 
 	return nil
+}
+
+func (c *Client) isIgnored(r *region) bool {
+	if _, ok := c.ignores[r.ID]; ok {
+		return true
+	}
+	return false
 }

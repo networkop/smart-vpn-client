@@ -1,40 +1,43 @@
 package health
 
 import (
+	"math"
 	"net/http"
 	"time"
 
+	"github.com/networkop/smart-vpn-client/pkg/metrics"
 	"github.com/sirupsen/logrus"
 )
 
 var (
-	checkURL = "http://google.com"
+	checkURL = "http://example.com"
 	maxWait  = 10 * time.Second
 )
 
 // Health service details
 type Health struct {
 	interval int
-	baseline time.Duration
-	lastTen  []time.Duration
+	baseline int64
+	lastTen  []int64
 }
 
 // NewChecker creates health checking service
 func NewChecker(interval int) *Health {
+
 	return &Health{
 		interval: interval,
 		baseline: 0,
-		lastTen:  make([]time.Duration, 10),
+		lastTen:  make([]int64, 10),
 	}
 }
 
 // Start a periodic healthCheck loop
 func (c *Health) Start(out chan bool, in chan bool) {
 
-	doCheck := func(client http.Client) (time.Duration, error) {
+	doCheck := func(client http.Client) (int64, error) {
 		start := time.Now()
 		_, err := client.Get(checkURL)
-		total := time.Since(start)
+		total := time.Since(start).Milliseconds()
 		if err != nil {
 			return total, err
 		}
@@ -58,6 +61,9 @@ func (c *Health) Start(out chan bool, in chan bool) {
 				logrus.Infof("Failed baseline health check: %s", err)
 				break
 			}
+
+			metrics.HealthLatency.Set(float64(latency))
+			logrus.Infof("New baseline is %d ms; Threshold is %d", latency, latency*10)
 			c.baseline = latency
 
 		default:
@@ -68,13 +74,14 @@ func (c *Health) Start(out chan bool, in chan bool) {
 			}
 			latency, err := doCheck(client)
 
+			metrics.HealthLatency.Set(float64(latency))
 			c.updateLastTen(latency)
 
 			if err != nil {
 				logrus.Infof("Failed health check: %s", err)
 				out <- false
 			} else if c.healthDegraded() {
-				logrus.Infof("Degraded health check for baseline %d ms: %+v", (c.baseline / time.Millisecond), c.lastTen)
+				logrus.Infof("Degraded health check for baseline %d ms: %+v", c.baseline, c.lastTen)
 				out <- false
 			} else {
 				logrus.Debugf("Health check successful, nothing to do...")
@@ -87,24 +94,35 @@ func (c *Health) Start(out chan bool, in chan bool) {
 	}
 }
 
-func (c *Health) updateLastTen(t time.Duration) {
+func (c *Health) updateLastTen(t int64) {
 	c.lastTen = append(c.lastTen[1:], t)
 }
 
-// Health is degraded when an average of the last 10 healthchecks
-// exceeds the 2 x baseline taken when the connection was established
+// Health is degraded when a weighted average of the last 10 healthchecks
+// exceeds the 10 x baseline taken when the connection was established
 func (c *Health) healthDegraded() bool {
 	if c.baseline == 0 { // baseline is not set yet
 		return false
 	}
-	var sum, avg float64
-	for i, l := range c.lastTen {
-		sum += (float64(l) / float64(i+1))
+	var numerator, denominator, result float64
+
+	logrus.Infof("Last Ten latencies: %+v", c.lastTen)
+	for i := len(c.lastTen) - 1; i >= 0; i-- {
+		step := len(c.lastTen) - i - 1
+
+		numerator += float64(c.lastTen[i]) * math.Exp(-float64(step))
+		denominator += math.Exp(-float64(step))
+
 	}
 
-	avg = sum / float64(len(c.lastTen))
+	result = numerator / denominator
+	metrics.LastTenAverage.Set(result)
+	logrus.Infof("Weighted Average:%.2f", result)
 
-	if avg > 4*float64(c.baseline) {
+	threshold := float64(10 * c.baseline)
+	metrics.DegradationLevel.Set(threshold)
+
+	if result > threshold {
 		return true
 	}
 
