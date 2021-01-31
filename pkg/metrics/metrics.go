@@ -23,12 +23,14 @@ var (
 		Name:      "average",
 		Help:      "Weighted-average of last 10 healthchecks",
 	})
-	DegradationLevel = prometheus.NewGauge(prometheus.GaugeOpts{
+	DegradationLevel = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "healthcheck",
 		Name:      "degraded",
 		Help:      "Latency degradation threshold",
-	})
+	},
+		[]string{"best"},
+	)
 )
 
 func Server() {

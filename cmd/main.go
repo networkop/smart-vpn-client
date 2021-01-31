@@ -90,7 +90,7 @@ func Run() error {
 	}
 
 	healthCh := make(chan bool, 1)
-	linkUpCh := make(chan bool, 1)
+	linkUpCh := make(chan string, 1)
 
 	healthChecker := health.NewChecker(*healthInt)
 

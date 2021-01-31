@@ -7,7 +7,7 @@ import (
 )
 
 // Monitor connectivity over the VPN tunnel
-func (c *Client) Monitor(in chan bool, out chan bool) {
+func (c *Client) Monitor(in chan bool, out chan string) {
 
 	defer c.wg.Cleanup()
 
@@ -49,7 +49,7 @@ func (c *Client) Monitor(in chan bool, out chan bool) {
 
 }
 
-func (c *Client) discoverAndConnect(out chan bool) {
+func (c *Client) discoverAndConnect(out chan string) {
 	err := c.Cleanup()
 	if err != nil {
 		logrus.Panicf("Failed to cleanup the tunnel configuration: %s", err)
@@ -71,7 +71,7 @@ func (c *Client) discoverAndConnect(out chan bool) {
 	}
 
 	if c.winner.connected {
-		out <- true
+		out <- c.winner.ID
 	}
 }
 

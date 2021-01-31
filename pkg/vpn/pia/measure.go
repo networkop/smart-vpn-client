@@ -75,7 +75,7 @@ func (c *Client) bestHeadend() {
 			logrus.Debugf("New best candidate %s@%d ms", r.ID, (r.latency / time.Millisecond))
 			bestLatency = r.latency
 			winner = *r
-			winnerURL = r.Servers.WG[0].CN
+			winnerURL = r.ID
 		}
 	}
 

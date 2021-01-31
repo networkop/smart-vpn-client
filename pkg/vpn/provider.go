@@ -12,6 +12,6 @@ type Provider interface {
 	Discover() error
 	Measure()
 	Connect() error
-	Monitor(chan bool, chan bool)
+	Monitor(chan bool, chan string)
 	Cleanup() error
 }

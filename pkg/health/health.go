@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/networkop/smart-vpn-client/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 )
 
@@ -32,7 +33,7 @@ func NewChecker(interval int) *Health {
 }
 
 // Start a periodic healthCheck loop
-func (c *Health) Start(out chan bool, in chan bool) {
+func (c *Health) Start(out chan bool, in chan string) {
 
 	doCheck := func(client http.Client) (int64, error) {
 		start := time.Now()
@@ -47,7 +48,7 @@ func (c *Health) Start(out chan bool, in chan bool) {
 	for {
 
 		select {
-		case <-in:
+		case winner := <-in:
 			c.baseline = 0
 			time.Sleep(time.Duration(c.interval) * time.Second)
 			client := http.Client{
@@ -63,6 +64,7 @@ func (c *Health) Start(out chan bool, in chan bool) {
 			}
 
 			metrics.HealthLatency.Set(float64(latency))
+			metrics.DegradationLevel.With(prometheus.Labels{"best": winner}).Set(float64(10 * latency))
 			logrus.Infof("New baseline is %d ms; Threshold is %d", latency, latency*10)
 			c.baseline = latency
 
@@ -120,7 +122,6 @@ func (c *Health) healthDegraded() bool {
 	logrus.Debugf("Weighted Average:%.2f", result)
 
 	threshold := float64(10 * c.baseline)
-	metrics.DegradationLevel.Set(threshold)
 
 	if result > threshold {
 		return true
