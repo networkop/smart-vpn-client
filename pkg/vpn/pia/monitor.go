@@ -35,7 +35,7 @@ func (c *Client) Monitor(in chan bool, out chan string) {
 				c.discoverAndConnect(out)
 
 			} else {
-				reduceByOne(failedCount)
+				failedCount = reduceByOne(failedCount)
 				if !c.wg.IsUp() {
 					logrus.Infof("Wireguard tunnel is not up, reconfiguring")
 					c.Connect()
