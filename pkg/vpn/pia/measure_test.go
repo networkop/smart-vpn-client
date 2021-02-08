@@ -34,8 +34,8 @@ func TestBestHeadend(t *testing.T) {
 
 	c.Headends = map[string]*region{
 		"a": buildFakeRegion("a", 1*time.Second),
-		"b": buildFakeRegion("b", 2*time.Second),
-		"c": buildFakeRegion("c", 1*time.Second),
+		"b": buildFakeRegion("b", 3*time.Second),
+		"c": buildFakeRegion("c", 2*time.Second),
 	}
 	c.bestHeadend()
 	if !equalRegions(c.winner, buildFakeRegion("a", 1*time.Second)) {
