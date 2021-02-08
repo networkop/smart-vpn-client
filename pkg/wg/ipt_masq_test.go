@@ -42,12 +42,6 @@ func TestIPtables(t *testing.T) {
 			wantOut: "",
 			wantErr: false,
 		},
-		{
-			name:    "fifth",
-			command: wg.delIPtables,
-			wantOut: "iptables: No chain/target/match by that name.\n",
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {

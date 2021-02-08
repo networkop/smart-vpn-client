@@ -1,16 +1,21 @@
 SOURCES := $(shell find . -name '*.go')
+COMMIT := $(shell git describe --dirty --always)
+LDFLAGS := "-s -w -X main.GitCommit=$(COMMIT)"
 DOCKER_IMAGE ?= networkop/smart-vpn-client
 
 default: smart-vpn-client
 
-smart-vpn-client: $(SOURCES)
-	CGO_ENABLED=0 go build -o smart-vpn-client -ldflags "-X main.version=$(VERSION) -extldflags -static" .
+smart-vpn-client: $(SOURCES) test
+	CGO_ENABLED=0 go build -o smart-vpn-client -ldflags $(LDFLAGS) main.go
+ 
+arm64: $(SOURCES) test
+	CGO_ENABLED=0 GOARCH=arm64 -o smart-vpn-client -ldflags $(LDFLAGS) main.go
 
-nas: $(SOURCES)
-	CGO_ENABLED=0 GOARCH=arm64 -o smart-vpn-client -ldflags "-X main.version=$(VERSION) -extldflags -static" .
-
-docker: Dockerfile
-	docker buildx build --push --platform linux/amd64,linux/arm64 -t $(DOCKER_IMAGE)  .
+docker: Dockerfile test
+	docker buildx build --push \
+	--platform linux/amd64,linux/arm64 \
+	--build-arg LDFLAGS=$(LDFLAGS) \
+	-t $(DOCKER_IMAGE):$(COMMIT)  .
 
 test:
-	go test -race ./...  -v
+	sudo go test -race ./...  -v

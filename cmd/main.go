@@ -18,6 +18,7 @@ import (
 const passwordEnvVar = "VPN_PWD"
 
 var (
+	version     = flag.Bool("v", false, "Display version")
 	vpnProvider = flag.String("provider", "pia", "VPN provider [pia]")
 	vpnUser     = flag.String("user", "", "VPN Username")
 	vpnPass     = flag.String("pwd", "", "VPN Password")
@@ -43,9 +44,18 @@ var (
 	}
 )
 
+func printVersion(gitCommit string) {
+	fmt.Printf("Version: %s\n", gitCommit)
+	os.Exit(0)
+}
+
 // Run the VPN client
-func Run() error {
+func Run(gitCommit string) error {
 	flag.Parse()
+
+	if *version {
+		printVersion(gitCommit)
+	}
 
 	if *debug {
 		logrus.SetLevel(logrus.DebugLevel)
