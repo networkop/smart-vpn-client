@@ -9,5 +9,6 @@ func (c *Client) Cleanup() error {
 		return err
 	}
 
-	return wg.Cleanup()
+	wg.Cleanup()
+	return nil
 }

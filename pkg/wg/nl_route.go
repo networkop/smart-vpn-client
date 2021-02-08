@@ -56,8 +56,9 @@ func (t *Tunnel) checkRouting() error {
 	for _, route := range routes {
 		if route.LinkIndex != t.link.Attrs().Index {
 			return fmt.Errorf("Route lookup return a wrong egress interface index. Expected %d, got: %+v", t.link.Attrs().Index, route)
+		} else {
+			return nil
 		}
-		return nil
 	}
 
 	return fmt.Errorf("Found no matching routes for %s", routeCheck)

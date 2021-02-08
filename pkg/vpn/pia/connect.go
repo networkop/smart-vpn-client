@@ -86,8 +86,8 @@ func (c *Client) buildPIAHTTPClient(remote string) *http.Client {
 			TLSClientConfig: &tls.Config{
 				RootCAs: caCertPool,
 			},
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				addr = remote
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				addr := remote
 				return (&net.Dialer{
 					Timeout: 10 * time.Second,
 				}).DialContext(ctx, network, addr)

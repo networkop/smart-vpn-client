@@ -2,7 +2,7 @@ package metrics
 
 import (
 	"net/http"
-
+	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -33,7 +33,7 @@ var (
 	)
 )
 
-func Server() {
+func Server(metricsPort int) {
 	r := prometheus.NewRegistry()
 	r.MustRegister(HealthLatency)
 	r.MustRegister(LastTenAverage)
@@ -41,5 +41,6 @@ func Server() {
 	handler := promhttp.HandlerFor(r, promhttp.HandlerOpts{})
 	http.Handle("/metrics", handler)
 
-	logrus.Fatal(http.ListenAndServe(":2112", nil))
+	url := fmt.Sprintf(":%d", metricsPort)
+	logrus.Fatal(http.ListenAndServe(url, nil))
 }

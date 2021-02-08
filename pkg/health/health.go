@@ -123,9 +123,5 @@ func (c *Health) healthDegraded() bool {
 
 	threshold := float64(10 * c.baseline)
 
-	if result > threshold {
-		return true
-	}
-
-	return false
+	return result > threshold
 }

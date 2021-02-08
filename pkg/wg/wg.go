@@ -57,20 +57,20 @@ func New() (*Tunnel, error) {
 	}, nil
 }
 
-func (t *Tunnel) Cleanup() error {
+func (t *Tunnel) Cleanup() {
 	t.link = t.getWgLink()
 	if t.link != nil {
 		if err := t.delWgLink(); err != nil {
-			return err
+			logrus.Errorf("Error deleting link: %s", err)
+			return
 		}
 	}
 	if err := t.delRules(); err != nil {
-		logrus.Debugf("Error delRules: %s", err)
+		logrus.Errorf("Error delRules: %s", err)
 	}
 	if _, err := t.delIPtables(); err != nil {
-		logrus.Debugf("Error delIPtables: %s", err)
+		logrus.Errorf("Error delIPtables: %s", err)
 	}
-	return nil
 }
 
 func (t *Tunnel) IsUp() bool {

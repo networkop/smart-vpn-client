@@ -35,13 +35,7 @@ var (
 	}{
 		pia: "pia",
 	}
-	supportedStrategies = struct {
-		naive   string
-		bestof5 string
-	}{
-		naive:   "naive",
-		bestof5: "bestof5",
-	}
+
 )
 
 func printVersion(gitCommit string) {
@@ -108,7 +102,7 @@ func Run(gitCommit string) error {
 
 	go client.Monitor(healthCh, linkUpCh)
 
-	go metrics.Server()
+	go metrics.Server(*metricsPort)
 
 	select {}
 

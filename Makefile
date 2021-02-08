@@ -19,3 +19,6 @@ docker: Dockerfile test
 
 test:
 	sudo go test -race ./...  -v
+
+lint:
+	golangci-lint run
