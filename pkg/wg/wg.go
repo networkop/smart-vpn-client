@@ -66,10 +66,10 @@ func (t *Tunnel) Cleanup() {
 		}
 	}
 	if err := t.delRules(); err != nil {
-		logrus.Errorf("Error delRules: %s", err)
+		logrus.Infof("Error delRules: %s", err)
 	}
 	if _, err := t.delIPtables(); err != nil {
-		logrus.Errorf("Error delIPtables: %s", err)
+		logrus.Infof("Error delIPtables: %s", err)
 	}
 }
 

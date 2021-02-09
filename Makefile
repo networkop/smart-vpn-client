@@ -9,7 +9,7 @@ smart-vpn-client: $(SOURCES) test
 	CGO_ENABLED=0 go build -o smart-vpn-client -ldflags $(LDFLAGS) main.go
  
 arm64: $(SOURCES) test
-	CGO_ENABLED=0 GOARCH=arm64 -o smart-vpn-client -ldflags $(LDFLAGS) main.go
+	CGO_ENABLED=0 GOARCH=arm64 go build -o smart-vpn-client -ldflags $(LDFLAGS) main.go
 
 docker: Dockerfile test
 	docker buildx build --push \
@@ -23,3 +23,4 @@ test:
 
 lint:
 	golangci-lint run
+
