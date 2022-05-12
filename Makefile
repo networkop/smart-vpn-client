@@ -19,7 +19,7 @@ docker: Dockerfile test
 	-t $(DOCKER_IMAGE):latest .
 
 test:
-	sudo go test -race ./...  -v
+	sudo /usr/local/go/bin/go test -race ./...  -v
 
 lint:
 	golangci-lint run

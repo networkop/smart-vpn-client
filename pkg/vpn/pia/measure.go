@@ -43,16 +43,18 @@ func (c *Client) Measure() {
 
 					total := time.Since(start)
 
+					logrus.Debugf("Latency to %s was %d ms", server.CN, r.latency/time.Millisecond)
+
 					r.latency = total
 
-					logrus.Debugf("Latency to %s is %d ms", server.CN, total/time.Millisecond)
+					logrus.Debugf("Latency to %s now %d ms", server.CN, r.latency/time.Millisecond)
 				}
 
 			}
 
-			lock.Lock()
-			c.Headends[id] = r
-			lock.Unlock()
+			//lock.Lock()
+			//c.Headends[id] = r
+			//lock.Unlock()
 
 		}(id, r, &wg)
 
