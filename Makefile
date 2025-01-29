@@ -2,6 +2,7 @@ SOURCES := $(shell find . -name '*.go')
 COMMIT := $(shell git describe --dirty --always)
 LDFLAGS := "-s -w -X main.GitCommit=$(COMMIT)"
 DOCKER_IMAGE ?= networkop/smart-vpn-client
+GO := $(shell which go)
 
 default: smart-vpn-client
 
@@ -19,7 +20,7 @@ docker: Dockerfile test
 	-t $(DOCKER_IMAGE):latest .
 
 test:
-	sudo /usr/local/go/bin/go test -race ./...  -v
+	sudo $(GO) test -race ./...  -v
 
 lint:
 	golangci-lint run

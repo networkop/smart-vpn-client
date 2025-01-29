@@ -12,7 +12,7 @@ import (
 var (
 	defaultMeasureMaxWait = 1 * time.Second
 	defaultMaxBestLatency = 10 * time.Second
-	lock                  = sync.RWMutex{}
+	// lock                  = sync.RWMutex{}
 )
 
 // Measure latency to discovered headends
