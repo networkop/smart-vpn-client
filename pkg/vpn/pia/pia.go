@@ -23,13 +23,14 @@ type Client struct {
 	measureInt     int
 	maxFailed      int
 	ignores        map[string]struct{}
+	preferVPN      string
 	measureMaxWait time.Duration
 	maxBestLatency time.Duration
 	winner         *region
 }
 
 // NewClient returns new PIA client
-func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string) (*Client, error) {
+func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string, preferVPN string) (*Client, error) {
 
 	ignoresMap := make(map[string]struct{})
 	for _, ignore := range ignores {
@@ -45,6 +46,7 @@ func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string) (*
 		measureMaxWait: defaultMeasureMaxWait,
 		maxBestLatency: defaultMaxBestLatency,
 		maxFailed:      maxFailed,
+		preferVPN:      preferVPN,
 	}, nil
 }
 

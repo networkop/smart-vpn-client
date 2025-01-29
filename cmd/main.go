@@ -25,6 +25,7 @@ var (
 	maxFail     = flag.Int("fails", 3, "Maximum number of failed healthchecks before reconnect")
 	healthInt   = flag.Int("health", 10, "health-checking interval (sec)")
 	ignoreVPNs  = flag.String("ignore", "", `A comma-separated list of VPN headends to ignore, e.g. "--ignore=uk_2"`)
+	preferVPN   = flag.String("prefer", "", "VPN headend to prefer")
 	latencyInt  = flag.Int("best", 30, "best VPN headend interval (sec)")
 	cleanup     = flag.Bool("cleanup", false, "cleanup VPN configuration")
 	metricsPort = flag.Int("metrics", 2112, "Port to expose /metrics on")
@@ -35,7 +36,6 @@ var (
 	}{
 		pia: "pia",
 	}
-
 )
 
 func printVersion(gitCommit string) {
@@ -74,7 +74,7 @@ func Run(gitCommit string) error {
 	switch *vpnProvider {
 	case supportedProviders.pia:
 		logrus.Info("VPN provider is PIA")
-		client, err = pia.NewClient(*vpnUser, secret, *latencyInt, *maxFail, ignores)
+		client, err = pia.NewClient(*vpnUser, secret, *latencyInt, *maxFail, ignores, *preferVPN)
 	default:
 		flag.Usage()
 		return fmt.Errorf("Unsupported/Undefined VPN provider: %v", *vpnProvider)
