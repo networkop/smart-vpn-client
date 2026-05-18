@@ -71,7 +71,9 @@ func TestBuildPIAHTTPClient_StrictAndCNFallback(t *testing.T) {
 	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte("ok"))
+		if _, err := w.Write([]byte("ok")); err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	}))
 	srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
 	srv.StartTLS()
@@ -103,6 +105,9 @@ func TestBuildPIAHTTPClient_StrictAndCNFallback(t *testing.T) {
 	cert2, _ := tls.X509KeyPair(certPEM2, keyPEM2)
 	srv2 := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
+		if _, err := w.Write([]byte{}); err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	}))
 	srv2.TLS = &tls.Config{Certificates: []tls.Certificate{cert2}}
 	srv2.StartTLS()

@@ -16,10 +16,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.60
+      - name: Install golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          echo "GOBIN: $(go env GOBIN) GOPATH: $(go env GOPATH)"
+      - name: Run golangci-lint
+        run: |
+          $(go env GOPATH)/bin/golangci-lint --version || golangci-lint --version
+          $(go env GOPATH)/bin/golangci-lint run ./... || golangci-lint run ./...
 
   unit-test:
     runs-on: ubuntu-latest
