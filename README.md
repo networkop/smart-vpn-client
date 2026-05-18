@@ -86,6 +86,20 @@ If you'd prefer to temporarily re-enable legacy CN matching globally for debuggi
 - goreleaser is configured with `.goreleaser.yml` and a release workflow is triggered on Git tags matching `v*`.
 - Dependabot is enabled to ensure security vulnerabilities are detected and fixed automatically. To keep regular dependency churn under control, this repository uses a scheduled GitHub Action (runs Jan 1 and Jul 1) to perform full dependency upgrades and open a PR every six months. Dependabot will still open PRs for security advisories as soon as they're detected.
 
+## Docker image publishing
+
+This repository publishes multi-arch Docker images when code is pushed to `main` or when a tag matching `v*` is created. The GitHub Action uses Docker Hub credentials stored in repository secrets. To enable publishing, add these secrets to your repository settings:
+
+- `DOCKERHUB_USERNAME` — your Docker Hub username
+- `DOCKERHUB_PASSWORD` — a Docker Hub access token or password
+
+Images pushed:
+- `networkop/smart-vpn-client:latest` (on push to main)
+- `networkop/smart-vpn-client:<commit-sha>` (always)
+- `networkop/smart-vpn-client:<tag>` (when you push a tag like `v1.2.3`)
+
+If you still see a 4-year-old image as `latest` after enabling the workflow, make sure the action completed successfully and that your Docker Hub credentials are correct. Creating a new tag (e.g. `git tag v0.0.1 && git push origin v0.0.1`) will force the action to push a tag-based image.
+
 ## Tests
 
 Run unit tests with:
