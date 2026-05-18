@@ -76,6 +76,14 @@ func (t *Tunnel) Cleanup() {
 func (t *Tunnel) IsUp() bool {
 	logrus.Debugf("Checking the state of the wireguard tunnel")
 
+	// Refresh link reference in case the kernel created/removed the interface
+	// since the Tunnel object was initialized. Avoid dereferencing a nil link.
+	t.link = t.getWgLink()
+	if t.link == nil {
+		logrus.Debugf("No wireguard link found for %s", t.intfName)
+		return false
+	}
+
 	err := t.checkRouting()
 	if err != nil {
 		logrus.Debugf("Failed checkRouting: %s", err)

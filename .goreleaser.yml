@@ -1,0 +1,24 @@
+project_name: smart-vpn-client
+
+builds:
+  - id: smart-vpn-client
+    main: ./main.go
+    binary: smart-vpn-client
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+release:
+  github:
+    owner: networkop
+    name: smart-vpn-client
+
+changelog:
+  use: git

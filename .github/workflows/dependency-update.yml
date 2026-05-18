@@ -1,0 +1,46 @@
+name: Scheduled dependency update
+
+on:
+  schedule:
+    # Run on Jan 1 and Jul 1 at 00:00 UTC
+    - cron: '0 0 1 1 *'
+    - cron: '0 0 1 7 *'
+
+  workflow_dispatch: {}
+
+jobs:
+  update-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update modules
+        run: |
+          go get -u ./...
+          go mod tidy
+
+      - name: Check for changes and create PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            branch="deps/update-$(date +%Y%m%d%H%M%S)"
+            git checkout -b "$branch"
+            git add go.mod go.sum
+            git commit -m "chore(deps): update go modules"
+            git push --set-upstream origin "$branch"
+            gh pr create --title "chore: update go modules" --body "Automated dependency update" --base main --head "$branch" || true
+          else
+            echo "No dependency updates"
+          fi

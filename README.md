@@ -71,6 +71,30 @@ To view the container logs at any stage do:
 docker logs vpn
 ```
 
+## TLS compatibility with legacy CN-only certificates
+
+Some VPN headends present certificates that rely on the legacy X.509 Common Name (CN) field instead of SANs. Because modern Go performs hostname verification against SANs, this client implements a conservative fallback:
+
+- The client validates the server certificate chain against the fetched CA.
+- It first attempts normal hostname verification (including SANs).
+- If the chain verifies but hostname verification fails and the certificate has no SANs, it will accept the certificate when the certificate CommonName matches the expected server name. This behavior is documented and logged.
+
+If you'd prefer to temporarily re-enable legacy CN matching globally for debugging, you can set the environment variable `GODEBUG=x509ignoreCN=0` for the process or container. This is not recommended for production.
+
+## Automated releases and dependency updates
+
+- goreleaser is configured with `.goreleaser.yml` and a release workflow is triggered on Git tags matching `v*`.
+- Dependabot is enabled to ensure security vulnerabilities are detected and fixed automatically. To keep regular dependency churn under control, this repository uses a scheduled GitHub Action (runs Jan 1 and Jul 1) to perform full dependency upgrades and open a PR every six months. Dependabot will still open PRs for security advisories as soon as they're detected.
+
+## Tests
+
+Run unit tests with:
+
+```bash
+go test ./...
+```
+
+
 ## Monitor
 
 By default, all healthchecks metrics are exposed on `localhost:2112/metrics` and can be scraped with Grafana Agent (or Prometheus) like this:

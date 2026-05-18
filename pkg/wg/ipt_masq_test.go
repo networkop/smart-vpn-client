@@ -1,10 +1,14 @@
 package wg
 
 import (
+	"os"
 	"testing"
 )
 
 func TestIPtables(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("skipping iptables tests when not running as root")
+	}
 	wg, err := New()
 	if err != nil {
 		t.Fatal(err)

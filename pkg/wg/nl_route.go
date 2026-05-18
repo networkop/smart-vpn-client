@@ -48,6 +48,14 @@ func (t *Tunnel) EnsureRouting(nexthop string) error {
 
 func (t *Tunnel) checkRouting() error {
 
+	if t.link == nil {
+		// try to refresh the link from kernel
+		t.link = t.getWgLink()
+		if t.link == nil {
+			return fmt.Errorf("wireguard link %q not found", t.intfName)
+		}
+	}
+
 	routes, err := netlink.RouteGet(net.ParseIP(routeCheck))
 	if err != nil {
 		return err

@@ -3,10 +3,15 @@ package wg
 import (
 	"testing"
 
+	"os"
+
 	"github.com/vishvananda/netlink"
 )
 
 func TestRules(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("skipping netlink rule tests when not running as root")
+	}
 	wg, err := New()
 	if err != nil {
 		t.Fatal(err)
