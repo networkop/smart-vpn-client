@@ -1,4 +1,4 @@
-FROM --platform=${BUILDPLATFORM} golang:1.15.6-buster as builder
+FROM --platform=${BUILDPLATFORM} golang:1.26 AS builder
 
 WORKDIR /src
 

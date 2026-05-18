@@ -1,6 +1,6 @@
 module github.com/networkop/smart-vpn-client
 
-go 1.22
+go 1.26
 
 require (
 	github.com/prometheus/client_golang v1.9.0
