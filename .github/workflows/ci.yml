@@ -13,17 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: stable
       - name: Install golangci-lint
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          echo "GOBIN: $(go env GOBIN) GOPATH: $(go env GOPATH)"
-      - name: Run golangci-lint
-        run: |
-          $(go env GOPATH)/bin/golangci-lint --version || golangci-lint --version
-          $(go env GOPATH)/bin/golangci-lint run ./... || golangci-lint run ./...
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - name: Run linter via Makefile
+        run: make lint
 
   unit-test:
     runs-on: ubuntu-latest

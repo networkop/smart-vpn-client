@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -36,22 +38,14 @@ jobs:
 
       - name: Create buildx builder
         run: |
-          docker buildx create --use --name multi-builder || true
+          docker buildx create --use --name multi-builder --driver docker-container || true
+          docker buildx inspect --bootstrap
 
-      - name: Build and push (multi-arch)
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          outputs: type=registry
-          tags: |
-            ghcr.io/networkop/smart-vpn-client:latest
-            ghcr.io/networkop/smart-vpn-client:${{ github.sha }}
-            ${{ github.ref_type == 'tag' && format('ghcr.io/networkop/smart-vpn-client:%s', github.ref_name) || '' }}
-          build-args: |
-            LDFLAGS=${{ env.LDFLAGS }}
+      - name: Build and push via Makefile
+        env:
+          DOCKER_IMAGE: ghcr.io/networkop/smart-vpn-client
+        run: |
+          make docker DOCKER_IMAGE=${DOCKER_IMAGE}
 
       - name: Image info
         run: |

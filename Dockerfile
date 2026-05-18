@@ -15,7 +15,17 @@ ENV CGO_ENABLED=0
 ARG TARGETOS
 ARG TARGETARCH
 
+# Install 'file' so we can inspect the built binary in CI logs for debugging
+RUN apt-get update && apt-get install -y --no-install-recommends file && rm -rf /var/lib/apt/lists/*
+
+# Build for the target platform. Using TARGETOS/TARGETARCH supplied by buildx.
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "${LDFLAGS}" -o smart-vpn-client main.go
+
+# Debugging: print the Go env and binary file information so CI logs reveal
+# whether the binary was built for the expected architecture.
+RUN echo "GOOS=${TARGETOS} TARGETARCH=${TARGETARCH}" && \
+	GOOS=${TARGETOS} GOARCH=${TARGETARCH} go env GOOS GOARCH && \
+	file ./smart-vpn-client || true
 
 FROM alpine:latest
 

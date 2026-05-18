@@ -38,7 +38,7 @@ func (t *Tunnel) addDefaultRule() error {
 	nlRule.Priority = defaultRulePrio
 	nlRule.Family = netlink.FAMILY_V4
 	nlRule.Invert = true
-	nlRule.Mark = defaultFwMark
+	nlRule.Mark = uint32(defaultFwMark)
 	nlRule.Table = defaultRouteTable
 
 	err := netlink.RuleAdd(nlRule)
@@ -69,7 +69,7 @@ func (t *Tunnel) getDefaultRule() *netlink.Rule {
 		return nil
 	}
 	for _, rule := range rules {
-		if rule.Priority == defaultRulePrio && rule.Mark == defaultFwMark {
+		if rule.Priority == defaultRulePrio && rule.Mark == uint32(defaultFwMark) {
 			return &rule
 		}
 	}

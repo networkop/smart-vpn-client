@@ -25,10 +25,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Update modules
+      - name: Update modules via Makefile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          go get -u ./...
-          go mod tidy
+          make update-deps
 
       - name: Check for changes and create PR
         env:
