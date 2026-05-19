@@ -68,6 +68,9 @@ func (t *Tunnel) Cleanup() {
 	if err := t.delRules(); err != nil {
 		logrus.Infof("Error delRules: %s", err)
 	}
+	if _, err := t.delIPtables(); err != nil {
+		logrus.Debugf("delIPtables during cleanup: %s", err)
+	}
 }
 
 func (t *Tunnel) IsUp() bool {
@@ -84,6 +87,11 @@ func (t *Tunnel) IsUp() bool {
 	err := t.checkRouting()
 	if err != nil {
 		logrus.Debugf("Failed checkRouting: %s", err)
+		return false
+	}
+
+	if _, err = t.getIPtables(); err != nil {
+		logrus.Debugf("Failed getIPtables: %s", err)
 		return false
 	}
 
