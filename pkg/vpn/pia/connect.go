@@ -98,71 +98,17 @@ func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Clie
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				// ServerName ensures SNI is sent correctly when dialing by IP,
-				// so the server knows which certificate to present.
+				// ServerName ensures correct SNI is sent when dialing by IP,
+				// and is used for hostname verification against the cert's SANs.
 				ServerName: serverName,
-				// We enable InsecureSkipVerify and perform our own verification in
-				// VerifyPeerCertificate so we can accept CN-only certs while still
-				// validating the chain against our CA pool.
-				InsecureSkipVerify: true,
-				VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-					if len(rawCerts) == 0 {
-						return fmt.Errorf("no server certificates presented")
-					}
-
-					certs := make([]*x509.Certificate, len(rawCerts))
-					for i, asn1 := range rawCerts {
-						cert, err := x509.ParseCertificate(asn1)
-						if err != nil {
-							return fmt.Errorf("failed to parse certificate: %w", err)
-						}
-						certs[i] = cert
-					}
-
-					intermediates := x509.NewCertPool()
-					for _, ic := range certs[1:] {
-						intermediates.AddCert(ic)
-					}
-
-					// First, try strict verification including hostname.
-					opts := x509.VerifyOptions{
-						Roots:         caCertPool,
-						Intermediates: intermediates,
-						DNSName:       serverName,
-					}
-					if _, err := certs[0].Verify(opts); err == nil {
-						return nil
-					}
-
-					// If strict verification failed, try verifying the chain without
-					// hostname checks, then fallback to comparing CommonName (CN)
-					// when SANs are absent.
-					opts.DNSName = ""
-					if _, err := certs[0].Verify(opts); err != nil {
-						return fmt.Errorf("certificate chain verification failed: %w", err)
-					}
-
-					// If certificate has SANs (DNSNames or IPAddresses) and strict
-					// verification already failed, don't accept the CN fallback.
-					if len(certs[0].DNSNames) > 0 || len(certs[0].IPAddresses) > 0 {
-						return fmt.Errorf("certificate hostname verification failed")
-					}
-
-					// Fallback: accept certificate when its CommonName matches the
-					// provided serverName. Log a warning so this exceptional path is visible.
-					if certs[0].Subject.CommonName == serverName {
-						logrus.Warnf("TLS CN fallback: accepting certificate for %s based on CommonName %s", serverName, certs[0].Subject.CommonName)
-						return nil
-					}
-
-					return fmt.Errorf("server name %q does not match certificate CommonName %q", serverName, certs[0].Subject.CommonName)
-				},
+				// RootCAs includes both the system pool (for publicly-trusted certs)
+				// and PIA's own CA (for their self-signed API endpoints).
+				RootCAs: caCertPool,
 			},
 			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-				addr := remote
 				return (&net.Dialer{
 					Timeout: 10 * time.Second,
-				}).DialContext(ctx, network, addr)
+				}).DialContext(ctx, network, remote)
 			},
 		},
 	}
