@@ -31,8 +31,8 @@ FROM alpine:latest
 
 RUN apk upgrade --no-cache && \
     apk add --no-cache iptables-legacy ca-certificates && \
-    ln -sf /sbin/iptables-legacy /sbin/iptables && \
-    ln -sf /sbin/ip6tables-legacy /sbin/ip6tables
+    ln -sf /sbin/iptables-legacy /usr/local/bin/iptables && \
+    ln -sf /sbin/ip6tables-legacy /usr/local/bin/ip6tables
 
 WORKDIR /
 COPY --from=builder /src/smart-vpn-client .

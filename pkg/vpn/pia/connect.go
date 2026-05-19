@@ -84,7 +84,14 @@ func (c *Client) Connect() error {
 // certificate CommonName when SANs are missing.
 func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Client {
 	logrus.Debugf("Building an HTTP client to connect to %s (serverName=%s)", remote, serverName)
-	caCertPool := x509.NewCertPool()
+
+	// Seed with the system CA pool so publicly-trusted certs work, then
+	// append PIA's own CA for their self-signed API endpoints.
+	caCertPool, err := x509.SystemCertPool()
+	if err != nil {
+		logrus.Warnf("Failed to load system cert pool, falling back to empty pool: %s", err)
+		caCertPool = x509.NewCertPool()
+	}
 	caCertPool.AppendCertsFromPEM(c.caCert)
 
 	return &http.Client{
