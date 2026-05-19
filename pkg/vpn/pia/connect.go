@@ -94,7 +94,7 @@ func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Clie
 	caCertPool.AppendCertsFromPEM(c.caCert)
 
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				// ServerName is still set so SNI is sent correctly even though
@@ -150,7 +150,7 @@ func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Clie
 			},
 			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return (&net.Dialer{
-					Timeout: 10 * time.Second,
+					Timeout: 5 * time.Second,
 				}).DialContext(ctx, network, remote)
 			},
 		},
