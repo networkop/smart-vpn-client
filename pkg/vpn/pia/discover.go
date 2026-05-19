@@ -26,7 +26,7 @@ type piaV4 struct {
 type region struct {
 	Servers   piaServerInfo `json:"servers,omitempty"`
 	latency   time.Duration
-	ID        string `json:"id,omitempty"`
+	ID        string        `json:"id,omitempty"`
 	connected bool
 }
 
