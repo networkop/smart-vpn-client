@@ -8,10 +8,6 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-const (
-	routeCheck = "1.1.1.1"
-)
-
 // EnsureRouting for the wireguard tunnel
 func (t *Tunnel) EnsureRouting(nexthop string) error {
 
@@ -56,18 +52,26 @@ func (t *Tunnel) checkRouting() error {
 		}
 	}
 
-	routes, err := netlink.RouteGet(net.ParseIP(routeCheck))
+	// Directly inspect the VPN routing table rather than using RouteGet,
+	// which resolves against the main table and misses our policy-routed
+	// table entirely (RTM_GETROUTE without a mark walks the main FIB).
+	filter := &netlink.Route{
+		Table:     defaultRouteTable,
+		LinkIndex: t.link.Attrs().Index,
+	}
+	routes, err := netlink.RouteListFiltered(
+		netlink.FAMILY_V4, filter,
+		netlink.RT_FILTER_TABLE|netlink.RT_FILTER_OIF,
+	)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to list routes in table %d: %w", defaultRouteTable, err)
 	}
 
 	for _, route := range routes {
-		if route.LinkIndex != t.link.Attrs().Index {
-			return fmt.Errorf("Route lookup return a wrong egress interface index. Expected %d, got: %+v", t.link.Attrs().Index, route)
-		} else {
+		if route.Dst == nil || route.Dst.String() == "0.0.0.0/0" {
 			return nil
 		}
 	}
 
-	return fmt.Errorf("Found no matching routes for %s", routeCheck)
+	return fmt.Errorf("no default route found in table %d via %s", defaultRouteTable, t.intfName)
 }
