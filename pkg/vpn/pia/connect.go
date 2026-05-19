@@ -97,32 +97,50 @@ func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Clie
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
+				// ServerName is still set so SNI is sent correctly even though
+				// we bypass Go's standard hostname verification below.
 				ServerName: serverName,
-				RootCAs:    caCertPool,
-				// VerifyConnection runs after the standard TLS handshake succeeds.
-				// PIA meta servers use CN-only certs (no SANs); Go 1.15+ rejects
-				// these by default, so we add a targeted fallback: accept a cert
-				// whose CommonName matches serverName only when no SANs are present.
-				VerifyConnection: func(cs tls.ConnectionState) error {
-					if len(cs.PeerCertificates) == 0 {
-						return fmt.Errorf("no peer certificates")
+				// InsecureSkipVerify disables Go's built-in hostname check, which
+				// rejects CN-only certs before any callback can run. All
+				// verification is performed manually in VerifyPeerCertificate.
+				InsecureSkipVerify: true, //nolint:gosec
+				VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+					if len(rawCerts) == 0 {
+						return fmt.Errorf("no server certificates")
 					}
-					leaf := cs.PeerCertificates[0]
-					// If the cert has SANs, standard verification already handled it.
-					if len(leaf.DNSNames) > 0 || len(leaf.IPAddresses) > 0 {
-						return nil
+					certs := make([]*x509.Certificate, len(rawCerts))
+					for i, raw := range rawCerts {
+						cert, err := x509.ParseCertificate(raw)
+						if err != nil {
+							return fmt.Errorf("failed to parse certificate: %w", err)
+						}
+						certs[i] = cert
 					}
-					// CN-only fallback: verify chain then check CommonName.
+					leaf := certs[0]
 					intermediates := x509.NewCertPool()
-					for _, c := range cs.PeerCertificates[1:] {
+					for _, c := range certs[1:] {
 						intermediates.AddCert(c)
 					}
+					// Try strict verification including hostname (modern SANs certs).
+					if _, err := leaf.Verify(x509.VerifyOptions{
+						Roots:         caCertPool,
+						Intermediates: intermediates,
+						DNSName:       serverName,
+					}); err == nil {
+						return nil
+					}
+					// Strict check failed — verify chain without hostname.
 					if _, err := leaf.Verify(x509.VerifyOptions{
 						Roots:         caCertPool,
 						Intermediates: intermediates,
 					}); err != nil {
 						return fmt.Errorf("certificate chain verification failed: %w", err)
 					}
+					// Chain is valid. If SANs exist the hostname mismatch is a hard failure.
+					if len(leaf.DNSNames) > 0 || len(leaf.IPAddresses) > 0 {
+						return fmt.Errorf("certificate SANs do not match server name %q", serverName)
+					}
+					// CN-only fallback: CommonName must match.
 					if leaf.Subject.CommonName != serverName {
 						return fmt.Errorf("CN %q does not match server name %q", leaf.Subject.CommonName, serverName)
 					}
