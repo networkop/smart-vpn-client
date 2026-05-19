@@ -27,7 +27,7 @@ RUN echo "GOOS=${TARGETOS} TARGETARCH=${TARGETARCH}" && \
 	GOOS=${TARGETOS} GOARCH=${TARGETARCH} go env GOOS GOARCH && \
 	file ./smart-vpn-client || true
 
-FROM alpine:latest
+FROM alpine:3.21
 
 RUN apk upgrade --no-cache && \
     apk add --no-cache iptables-legacy ca-certificates && \
