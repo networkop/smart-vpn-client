@@ -67,11 +67,6 @@ func (c *Client) Connect() error {
 
 	c.winner.connected = true
 
-	err = c.wg.EnsureMasquerade()
-	if err != nil {
-		return fmt.Errorf("Error configuring NAT masquerade: %s", err)
-	}
-
 	return nil
 }
 

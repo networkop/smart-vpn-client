@@ -30,9 +30,7 @@ RUN echo "GOOS=${TARGETOS} TARGETARCH=${TARGETARCH}" && \
 FROM alpine:3.21
 
 RUN apk upgrade --no-cache && \
-    apk add --no-cache iptables-legacy ca-certificates && \
-    ln -sf "$(which iptables-legacy)" /usr/local/bin/iptables && \
-    ln -sf "$(which ip6tables-legacy)" /usr/local/bin/ip6tables
+    apk add --no-cache ca-certificates
 
 WORKDIR /
 COPY --from=builder /src/smart-vpn-client .

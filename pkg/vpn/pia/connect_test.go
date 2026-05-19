@@ -61,10 +61,8 @@ func makeCerts(t *testing.T, serverName string, includeSAN bool) (caPEM, certPEM
 }
 
 func TestBuildPIAHTTPClient_StrictAndCNFallback(t *testing.T) {
-	// Create CA and server cert without SANs (CN-only)
-	caPEM, certPEM, keyPEM := makeCerts(t, "test-server.local", false)
-
-	// Build a TLS server using the cert
+	// Case 1: cert with matching SAN — should succeed.
+	caPEM, certPEM, keyPEM := makeCerts(t, "test-server.local", true)
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		t.Fatalf("keypair: %v", err)
@@ -79,35 +77,23 @@ func TestBuildPIAHTTPClient_StrictAndCNFallback(t *testing.T) {
 	srv.StartTLS()
 	defer srv.Close()
 
-	// override the client's caCert to the CA we made
 	c := &Client{caCert: caPEM}
-
-	// Extract host and port to dial directly
 	host, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	remote := net.JoinHostPort(host, port)
 
-	// Client should accept since we use CN fallback with serverName = CommonName
-	// Capture logs to ensure CN fallback is logged (skipped here); successful
-	// request is used to verify behaviour.
 	httpClient := c.buildPIAHTTPClient(remote, "test-server.local")
 	resp, err := httpClient.Get("https://test-server.local/")
 	if err != nil {
-		t.Fatalf("client get with CN fallback failed: %v", err)
+		t.Fatalf("expected success with matching SAN cert, got: %v", err)
 	}
 	resp.Body.Close()
-	// We can't easily capture logrus output here without changing global hooks in
-	// the package; relying on functional behaviour (request succeeding) is
-	// sufficient for unit tests in this environment.
 
-	// Now create a cert with SANs that don't match the requested name to ensure
-	// strict verification fails and we don't incorrectly accept CN when SANs exist.
+	// Case 2: cert with SANs that don't match the requested name — should fail.
 	caPEM2, certPEM2, keyPEM2 := makeCerts(t, "other.local", true)
 	cert2, _ := tls.X509KeyPair(certPEM2, keyPEM2)
 	srv2 := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		if _, err := w.Write([]byte{}); err != nil {
-			t.Fatalf("failed to write response: %v", err)
-		}
+		_, _ = w.Write([]byte{})
 	}))
 	srv2.TLS = &tls.Config{Certificates: []tls.Certificate{cert2}}
 	srv2.StartTLS()
@@ -120,5 +106,25 @@ func TestBuildPIAHTTPClient_StrictAndCNFallback(t *testing.T) {
 	_, err = httpClient2.Get("https://should-not-match.local/")
 	if err == nil {
 		t.Fatalf("expected hostname verification failure when SANs exist but don't match")
+	}
+
+	// Case 3: CN-only cert (no SANs) — should fail; Go 1.15+ requires SANs.
+	caPEM3, certPEM3, keyPEM3 := makeCerts(t, "test-server.local", false)
+	cert3, _ := tls.X509KeyPair(certPEM3, keyPEM3)
+	srv3 := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte{})
+	}))
+	srv3.TLS = &tls.Config{Certificates: []tls.Certificate{cert3}}
+	srv3.StartTLS()
+	defer srv3.Close()
+
+	c3 := &Client{caCert: caPEM3}
+	host3, port3, _ := net.SplitHostPort(srv3.Listener.Addr().String())
+	remote3 := net.JoinHostPort(host3, port3)
+	httpClient3 := c3.buildPIAHTTPClient(remote3, "test-server.local")
+	_, err = httpClient3.Get("https://test-server.local/")
+	if err == nil {
+		t.Fatalf("expected failure for CN-only cert without SANs")
 	}
 }
