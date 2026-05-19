@@ -98,6 +98,9 @@ func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Clie
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
+				// ServerName ensures SNI is sent correctly when dialing by IP,
+				// so the server knows which certificate to present.
+				ServerName: serverName,
 				// We enable InsecureSkipVerify and perform our own verification in
 				// VerifyPeerCertificate so we can accept CN-only certs while still
 				// validating the chain against our CA pool.
