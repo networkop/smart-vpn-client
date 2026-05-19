@@ -1,8 +1,8 @@
 package health
 
 import (
-	"math"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/networkop/smart-vpn-client/pkg/metrics"
@@ -15,6 +15,20 @@ var (
 	maxWait  = 10 * time.Second
 )
 
+const (
+	// Number of baseline samples to take and median over.
+	baselineSamples = 3
+	// Number of recent measurements kept.
+	windowSize = 10
+	// Threshold multiplier: sustained latency above baseline*degradationFactor triggers reconnect.
+	degradationFactor = 5.0
+	// Minimum fraction of window that must exceed the threshold before declaring degradation.
+	// 0.5 means more than half — a single spike (1/10) is ignored.
+	degradationQuorum = 0.5
+	// Minimum number of filled (non-zero) slots required before evaluating degradation.
+	minSamples = 3
+)
+
 // Health service details
 type Health struct {
 	interval int
@@ -24,11 +38,10 @@ type Health struct {
 
 // NewChecker creates health checking service
 func NewChecker(interval int) *Health {
-
 	return &Health{
 		interval: interval,
 		baseline: 0,
-		lastTen:  make([]int64, 10),
+		lastTen:  make([]int64, windowSize),
 	}
 }
 
@@ -45,36 +58,53 @@ func (c *Health) Start(out chan bool, in chan string) {
 		return total, nil
 	}
 
-	for {
+	newClient := func() http.Client {
+		return http.Client{
+			Timeout:   maxWait,
+			Transport: http.DefaultTransport.(*http.Transport).Clone(),
+		}
+	}
 
+	for {
 		select {
 		case winner := <-in:
 			c.baseline = 0
-			time.Sleep(time.Duration(c.interval) * time.Second)
-			client := http.Client{
-				Timeout:   maxWait,
-				Transport: http.DefaultTransport.(*http.Transport).Clone(),
-			}
-			logrus.Debugf("VPN tunnel has been set up, taking the baseline measurement")
+			// Reset window so stale measurements from the previous connection
+			// don't influence the new one.
+			c.lastTen = make([]int64, windowSize)
 
-			latency, err := doCheck(client)
-			if err != nil {
-				logrus.Infof("Failed baseline health check: %s", err)
+			time.Sleep(time.Duration(c.interval) * time.Second)
+
+			// Take several samples and use their median as the baseline,
+			// so a single elevated measurement doesn't inflate the threshold.
+			var samples []int64
+			for i := 0; i < baselineSamples; i++ {
+				if i > 0 {
+					time.Sleep(time.Duration(c.interval) * time.Second)
+				}
+				latency, err := doCheck(newClient())
+				if err != nil {
+					logrus.Infof("Failed baseline sample %d: %s", i+1, err)
+					continue
+				}
+				samples = append(samples, latency)
+			}
+
+			if len(samples) == 0 {
+				logrus.Infof("All baseline samples failed, skipping baseline")
 				break
 			}
 
-			metrics.HealthLatency.Set(float64(latency))
-			metrics.DegradationLevel.With(prometheus.Labels{"best": winner}).Set(float64(10 * latency))
-			logrus.Infof("New baseline is %d ms; Threshold is %d", latency, latency*10)
-			c.baseline = latency
+			c.baseline = median(samples)
+			threshold := float64(c.baseline) * degradationFactor
+			metrics.HealthLatency.Set(float64(c.baseline))
+			metrics.DegradationLevel.With(prometheus.Labels{"best": winner}).Set(threshold)
+			logrus.Infof("New baseline is %d ms (median of %d samples); threshold is %.0f ms",
+				c.baseline, len(samples), threshold)
 
 		default:
 			logrus.Debugf("Periodic health checking")
-			client := http.Client{
-				Timeout:   maxWait,
-				Transport: http.DefaultTransport.(*http.Transport).Clone(),
-			}
-			latency, err := doCheck(client)
+			latency, err := doCheck(newClient())
 
 			metrics.HealthLatency.Set(float64(latency))
 			c.updateLastTen(latency)
@@ -83,15 +113,14 @@ func (c *Health) Start(out chan bool, in chan string) {
 				logrus.Infof("Failed health check: %s", err)
 				out <- false
 			} else if c.healthDegraded() {
-				logrus.Infof("Degraded health check for baseline %d ms: %+v", c.baseline, c.lastTen)
+				logrus.Infof("Degraded health: baseline %d ms, last ten: %v", c.baseline, c.lastTen)
 				out <- false
 			} else {
-				logrus.Debugf("Health check successful, nothing to do...")
+				logrus.Debugf("Health check successful")
 				out <- true
 			}
 
 			time.Sleep(time.Duration(c.interval) * time.Second)
-
 		}
 	}
 }
@@ -100,28 +129,51 @@ func (c *Health) updateLastTen(t int64) {
 	c.lastTen = append(c.lastTen[1:], t)
 }
 
-// Health is degraded when a weighted average of the last 10 healthchecks
-// exceeds the 10 x baseline taken when the connection was established
+// healthDegraded returns true when more than degradationQuorum of the filled
+// window slots exceed baseline*degradationFactor.
+//
+// A single spike — even 100x — only affects one slot, so 1/10 slots over
+// threshold does not trigger a reconnect. Sustained degradation where the
+// majority of measurements are elevated does.
 func (c *Health) healthDegraded() bool {
-	if c.baseline == 0 { // baseline is not set yet
+	if c.baseline == 0 {
 		return false
 	}
-	var numerator, denominator, result float64
 
-	logrus.Debugf("Last Ten latencies: %+v", c.lastTen)
-	for i := len(c.lastTen) - 1; i >= 0; i-- {
-		step := len(c.lastTen) - i - 1
+	threshold := float64(c.baseline) * degradationFactor
 
-		numerator += float64(c.lastTen[i]) * math.Exp(-float64(step))
-		denominator += math.Exp(-float64(step))
-
+	var exceeded, valid int
+	for _, ms := range c.lastTen {
+		if ms == 0 {
+			continue // unfilled slot
+		}
+		valid++
+		if float64(ms) > threshold {
+			exceeded++
+		}
 	}
 
-	result = numerator / denominator
-	metrics.LastTenAverage.Set(result)
-	logrus.Debugf("Weighted Average:%.2f", result)
+	if valid < minSamples {
+		return false // not enough data yet
+	}
 
-	threshold := float64(10 * c.baseline)
+	logrus.Debugf("Health: %d/%d measurements exceed threshold %.0f ms", exceeded, valid, threshold)
+	metrics.LastTenAverage.Set(float64(exceeded) / float64(valid))
 
-	return result > threshold
+	return float64(exceeded)/float64(valid) > degradationQuorum
+}
+
+// median returns the median value of a slice without mutating it.
+func median(samples []int64) int64 {
+	if len(samples) == 0 {
+		return 0
+	}
+	sorted := make([]int64, len(samples))
+	copy(sorted, samples)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 0 {
+		return (sorted[mid-1] + sorted[mid]) / 2
+	}
+	return sorted[mid]
 }
