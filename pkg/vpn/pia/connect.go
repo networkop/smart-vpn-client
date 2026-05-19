@@ -95,6 +95,7 @@ func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Clie
 	caCertPool.AppendCertsFromPEM(c.caCert)
 
 	return &http.Client{
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				// We enable InsecureSkipVerify and perform our own verification in

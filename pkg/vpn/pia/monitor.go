@@ -38,7 +38,10 @@ func (c *Client) Monitor(in chan bool, out chan string) {
 				failedCount = reduceByOne(failedCount)
 				if !c.wg.IsUp() {
 					logrus.Infof("Wireguard tunnel is not up, reconfiguring")
-					_ = c.Connect()
+					if err := c.Connect(); err != nil {
+						logrus.Infof("Reconfigure connect failed: %s; triggering rediscovery", err)
+						c.discoverAndConnect(out)
+					}
 				}
 			}
 		case <-ticker.C:
