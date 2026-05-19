@@ -29,7 +29,8 @@ RUN echo "GOOS=${TARGETOS} TARGETARCH=${TARGETARCH}" && \
 
 FROM alpine:latest
 
-RUN apk add --no-cache iptables
+RUN apk upgrade --no-cache && \
+    apk add --no-cache iptables ca-certificates
 
 WORKDIR /
 COPY --from=builder /src/smart-vpn-client .

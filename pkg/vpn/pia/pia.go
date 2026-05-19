@@ -1,6 +1,7 @@
 package pia
 
 import (
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
@@ -84,9 +85,19 @@ func (c *Client) getCAcert() error {
 		defer resp.Body.Close()
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download PIA CA cert: HTTP %d from %s", resp.StatusCode, caURL)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+
+	// Validate that the body is actually parseable PEM before storing it.
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(body) {
+		return fmt.Errorf("PIA CA cert downloaded from %s contains no valid PEM certificates", caURL)
 	}
 
 	c.caCert = body

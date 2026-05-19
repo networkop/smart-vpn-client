@@ -188,6 +188,10 @@ func (c *Client) genToken(r region) (string, error) {
 		defer resp.Body.Close()
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token request failed: HTTP %d", resp.StatusCode)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -196,11 +200,11 @@ func (c *Client) genToken(r region) (string, error) {
 	payload := authV3{}
 	err = json.Unmarshal(body, &payload)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to parse token response: %w", err)
 	}
 
 	if payload.Status != "OK" {
-		return "", fmt.Errorf("Failed to retrieve token: %s", err)
+		return "", fmt.Errorf("failed to retrieve token: status %q", payload.Status)
 	}
 
 	return payload.Token, nil
@@ -233,6 +237,10 @@ func (c *Client) genServer(r region, token string, pubKey wgtypes.Key) (*wgServe
 		defer resp.Body.Close()
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("addKey request failed: HTTP %d", resp.StatusCode)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -241,11 +249,11 @@ func (c *Client) genServer(r region, token string, pubKey wgtypes.Key) (*wgServe
 	payload := wgServerConf{}
 	err = json.Unmarshal(body, &payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse addKey response: %w", err)
 	}
 
 	if payload.Status != "OK" {
-		return nil, fmt.Errorf("Failed to retrieve wg server configuration: %s", err)
+		return nil, fmt.Errorf("failed to retrieve wg server configuration: status %q", payload.Status)
 	}
 
 	return &payload, nil
