@@ -108,7 +108,7 @@ func TestBuildPIAHTTPClient_StrictAndCNFallback(t *testing.T) {
 		t.Fatalf("expected hostname verification failure when SANs exist but don't match")
 	}
 
-	// Case 3: CN-only cert (no SANs) — should fail; Go 1.15+ requires SANs.
+	// Case 3: CN-only cert (no SANs) with matching CN — should succeed via CN fallback.
 	caPEM3, certPEM3, keyPEM3 := makeCerts(t, "test-server.local", false)
 	cert3, _ := tls.X509KeyPair(certPEM3, keyPEM3)
 	srv3 := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -123,8 +123,9 @@ func TestBuildPIAHTTPClient_StrictAndCNFallback(t *testing.T) {
 	host3, port3, _ := net.SplitHostPort(srv3.Listener.Addr().String())
 	remote3 := net.JoinHostPort(host3, port3)
 	httpClient3 := c3.buildPIAHTTPClient(remote3, "test-server.local")
-	_, err = httpClient3.Get("https://test-server.local/")
-	if err == nil {
-		t.Fatalf("expected failure for CN-only cert without SANs")
+	resp3, err := httpClient3.Get("https://test-server.local/")
+	if err != nil {
+		t.Fatalf("expected CN-only cert to be accepted via fallback, got: %v", err)
 	}
+	resp3.Body.Close()
 }

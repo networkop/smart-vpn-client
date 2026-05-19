@@ -97,12 +97,38 @@ func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Clie
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				// ServerName ensures correct SNI is sent when dialing by IP,
-				// and is used for hostname verification against the cert's SANs.
 				ServerName: serverName,
-				// RootCAs includes both the system pool (for publicly-trusted certs)
-				// and PIA's own CA (for their self-signed API endpoints).
-				RootCAs: caCertPool,
+				RootCAs:    caCertPool,
+				// VerifyConnection runs after the standard TLS handshake succeeds.
+				// PIA meta servers use CN-only certs (no SANs); Go 1.15+ rejects
+				// these by default, so we add a targeted fallback: accept a cert
+				// whose CommonName matches serverName only when no SANs are present.
+				VerifyConnection: func(cs tls.ConnectionState) error {
+					if len(cs.PeerCertificates) == 0 {
+						return fmt.Errorf("no peer certificates")
+					}
+					leaf := cs.PeerCertificates[0]
+					// If the cert has SANs, standard verification already handled it.
+					if len(leaf.DNSNames) > 0 || len(leaf.IPAddresses) > 0 {
+						return nil
+					}
+					// CN-only fallback: verify chain then check CommonName.
+					intermediates := x509.NewCertPool()
+					for _, c := range cs.PeerCertificates[1:] {
+						intermediates.AddCert(c)
+					}
+					if _, err := leaf.Verify(x509.VerifyOptions{
+						Roots:         caCertPool,
+						Intermediates: intermediates,
+					}); err != nil {
+						return fmt.Errorf("certificate chain verification failed: %w", err)
+					}
+					if leaf.Subject.CommonName != serverName {
+						return fmt.Errorf("CN %q does not match server name %q", leaf.Subject.CommonName, serverName)
+					}
+					logrus.Debugf("TLS: accepted CN-only cert for %s", serverName)
+					return nil
+				},
 			},
 			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return (&net.Dialer{

@@ -10,7 +10,7 @@ const (
 )
 
 func iptablesNat() *util.Command {
-	return util.NewCommand("iptables").With("-t").With("nat")
+	return util.NewCommand("iptables-legacy").With("-t").With("nat")
 }
 
 // EnsureMasquerade ensures the iptables MASQUERADE rule is set up.
