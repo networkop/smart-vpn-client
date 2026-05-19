@@ -1,12 +1,13 @@
 #
 name: Create and publish a Docker image
 
-# Configures this workflow to run every time a change is pushed to the branch called `release`.
+# This workflow is disabled. Multi-arch image builds (amd64 + arm64) are handled
+# by docker-publish.yml which correctly sets up QEMU and Docker Buildx.
+# Leaving this file here for reference only.
 on:
-  # Triggers the workflow on push events but only for the main branch
-  push:
+  workflow_dispatch:
     branches:
-      - main
+      - _disabled
 
 # Defines two custom environment variables for the workflow. These are used for the Container registry domain, and a name for the Docker image that this workflow builds.
 env:
