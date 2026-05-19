@@ -19,6 +19,15 @@ func TestRules(t *testing.T) {
 
 	wg.intfName = "wg-package-test"
 
+	// Clean up any pre-existing rules from a running VPN client so the test
+	// starts from a known state.
+	_ = wg.delLocalRule()
+	_ = wg.delDefaultRule()
+	t.Cleanup(func() {
+		_ = wg.delLocalRule()
+		_ = wg.delDefaultRule()
+	})
+
 	tests := []struct {
 		name          string
 		changeCommand func() error

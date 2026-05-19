@@ -70,6 +70,10 @@ func (c *Client) discoverAndConnect(out chan string) {
 	err = c.Connect()
 	if err != nil {
 		logrus.Infof("Connect failed: %s", err)
+		if c.winner != nil {
+			c.failedRegions[c.winner.ID] = time.Now()
+			logrus.Debugf("Cooling down %s for %s", c.winner.ID, connectFailureCooldown)
+		}
 		return
 	}
 

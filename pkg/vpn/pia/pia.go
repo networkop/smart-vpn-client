@@ -14,6 +14,8 @@ const (
 	caURL = "https://raw.githubusercontent.com/pia-foss/manual-connections/master/ca.rsa.4096.crt"
 )
 
+const connectFailureCooldown = 5 * time.Minute
+
 // Client stores VPN client configuration
 type Client struct {
 	user, pwd      string
@@ -28,6 +30,9 @@ type Client struct {
 	measureMaxWait time.Duration
 	maxBestLatency time.Duration
 	winner         *region
+	// failedRegions tracks regions where Connect() failed, keyed by region ID.
+	// Stored on Client (not region) so it survives Discover() rebuilding the headends map.
+	failedRegions  map[string]time.Time
 }
 
 // NewClient returns new PIA client
@@ -48,6 +53,7 @@ func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string, pr
 		maxBestLatency: defaultMaxBestLatency,
 		maxFailed:      maxFailed,
 		preferVPN:      preferVPN,
+		failedRegions:  make(map[string]time.Time),
 	}, nil
 }
 

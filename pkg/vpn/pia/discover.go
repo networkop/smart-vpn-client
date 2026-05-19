@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	piaV4discoveryURL  = "https://serverlist.piaservers.net/vpninfo/servers/v4"
+	piaV4discoveryURL  = "https://serverlist.piaservers.net/vpninfo/servers/v7"
 	piaV4payloadSigLen = 350
 )
 

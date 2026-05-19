@@ -72,6 +72,12 @@ func (c *Client) bestHeadend() {
 
 	for _, r := range c.Headends {
 
+		// skip regions that recently failed to connect
+		if failedAt, ok := c.failedRegions[r.ID]; ok && time.Since(failedAt) < connectFailureCooldown {
+			logrus.Debugf("Skipping %s: connect failed %s ago", r.ID, time.Since(failedAt).Round(time.Second))
+			continue
+		}
+
 		// always use preferred when defined
 		if c.preferVPN != "" && r.ID == c.preferVPN {
 
