@@ -64,13 +64,20 @@ func (c *Client) Measure() {
 
 }
 
-// best headend is the one with lowest latency in the last round of measurements unless 'prefer' is defined
-func (c *Client) bestHeadend() {
+// bestHeadend selects the lowest-latency available headend.
+// excludeID, if non-empty, is skipped — used by forced re-election to
+// guarantee a different region is chosen.
+func (c *Client) bestHeadend(excludeID string) {
 	var winnerURL string
 	var winner region
 	bestLatency := c.maxBestLatency
 
 	for _, r := range c.Headends {
+
+		// skip the explicitly excluded region (forced re-election)
+		if excludeID != "" && r.ID == excludeID {
+			continue
+		}
 
 		// skip regions that recently failed to connect
 		if failedAt, ok := c.failedRegions[r.ID]; ok && time.Since(failedAt) < connectFailureCooldown {
@@ -80,7 +87,6 @@ func (c *Client) bestHeadend() {
 
 		// always use preferred when defined
 		if c.preferVPN != "" && r.ID == c.preferVPN {
-
 			logrus.Debugf("Using preferred candidate %s@%d ms", r.displayName(), (r.latency / time.Millisecond))
 			bestLatency = r.latency
 			winner = *r
@@ -89,7 +95,6 @@ func (c *Client) bestHeadend() {
 		}
 		// otherwise pick the one with the lowest latency
 		if (r.latency > 0) && (r.latency < bestLatency) {
-
 			logrus.Debugf("New best candidate %s@%d ms", r.displayName(), (r.latency / time.Millisecond))
 			bestLatency = r.latency
 			winner = *r

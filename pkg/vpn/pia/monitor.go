@@ -46,7 +46,7 @@ func (c *Client) Monitor(in chan bool, out chan string) {
 			}
 		case <-c.nextCh:
 			logrus.Info("Re-election triggered")
-			c.reelectIfBetter(out)
+			c.reelectNext(out)
 
 		case <-ticker.C:
 			logrus.Debugf("Triggering periodic latency measurement")
@@ -69,7 +69,7 @@ func (c *Client) discoverAndConnect(out chan string) {
 	}
 
 	c.Measure()
-	c.bestHeadend()
+	c.bestHeadend("")
 
 	err = c.Connect()
 	if err != nil {
@@ -94,27 +94,22 @@ func reduceByOne(i int) int {
 	return 0
 }
 
-// reelectIfBetter re-runs discovery, measurement and headend selection.
-// It only tears down and reconnects if the elected winner differs from the
-// current one, so a call with no better alternative leaves the tunnel intact.
-func (c *Client) reelectIfBetter(out chan string) {
+// reelectNext re-runs discovery, measurement and headend selection,
+// always excluding the current headend so a different region is guaranteed.
+func (c *Client) reelectNext(out chan string) {
 	if err := c.Discover(); err != nil {
 		logrus.Infof("Re-election: discover failed: %s", err)
 		return
 	}
 	c.Measure()
 
-	previousID := ""
+	excludeID := ""
 	if c.winner != nil {
-		previousID = c.winner.ID
+		excludeID = c.winner.ID
+		logrus.Infof("Re-election: excluding current headend %s", c.winner.displayName())
 	}
 
-	c.bestHeadend()
-
-	if c.winner.ID == previousID {
-		logrus.Infof("Re-election: already on best region (%s), no switch needed", c.winner.displayName())
-		return
-	}
+	c.bestHeadend(excludeID)
 
 	logrus.Infof("Re-election: switching to %s", c.winner.displayName())
 	if err := c.Cleanup(); err != nil {
