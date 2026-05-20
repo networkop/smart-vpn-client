@@ -8,4 +8,5 @@ type Provider interface {
 	Connect() error
 	Monitor(chan bool, chan string)
 	Cleanup() error
+	TriggerNext()
 }

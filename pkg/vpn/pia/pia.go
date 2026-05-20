@@ -30,9 +30,19 @@ type Client struct {
 	measureMaxWait time.Duration
 	maxBestLatency time.Duration
 	winner         *region
-	// failedRegions tracks regions where Connect() failed, keyed by region ID.
-	// Stored on Client (not region) so it survives Discover() rebuilding the headends map.
 	failedRegions  map[string]time.Time
+	// nextCh is signalled by TriggerNext to request a headend re-election
+	// without tearing down the current connection if the winner is unchanged.
+	nextCh         chan struct{}
+}
+
+// TriggerNext requests a headend re-election. Non-blocking: if a re-election
+// is already pending the signal is dropped rather than queued.
+func (c *Client) TriggerNext() {
+	select {
+	case c.nextCh <- struct{}{}:
+	default:
+	}
 }
 
 // NewClient returns new PIA client
@@ -54,6 +64,7 @@ func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string, pr
 		maxFailed:      maxFailed,
 		preferVPN:      preferVPN,
 		failedRegions:  make(map[string]time.Time),
+		nextCh:         make(chan struct{}, 1),
 	}, nil
 }
 
