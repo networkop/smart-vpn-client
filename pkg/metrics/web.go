@@ -36,7 +36,9 @@ func WebServer(port int, ifaceName string, onNext func()) {
 
 	addr := fmt.Sprintf("%s:%d", ip, port)
 	logrus.Infof("Web dashboard: http://%s/", addr)
-	logrus.Fatal(http.ListenAndServe(addr, mux))
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		logrus.Errorf("Web: %s", err)
+	}
 }
 
 func ifaceIP(name string) (string, error) {

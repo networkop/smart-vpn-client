@@ -29,7 +29,7 @@ var (
 	latencyInt  = flag.Int("best", 30, "best VPN headend interval (sec)")
 	cleanup     = flag.Bool("cleanup", false, "cleanup VPN configuration")
 	metricsPort = flag.Int("metrics", 2112, "Port to expose /metrics on")
-	webPort     = flag.Int("web", 80, "Port to serve the HTML dashboard on")
+	webPort     = flag.Int("web", 8080, "Port to serve the HTML dashboard on")
 	webIface    = flag.String("web-iface", "eth0", "Interface to bind the HTML dashboard to")
 	debug       = flag.Bool("debug", false, "enable debug logging")
 
