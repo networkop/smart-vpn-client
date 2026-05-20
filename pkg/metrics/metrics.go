@@ -17,6 +17,12 @@ var (
 		Name:      "latency",
 		Help:      "Health-check latency",
 	})
+	Baseline = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "healthcheck",
+		Name:      "baseline_ms",
+		Help:      "Median baseline latency established after tunnel connect (ms)",
+	})
 	LastTenAverage = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "healthcheck",
@@ -47,6 +53,7 @@ var (
 func Server(metricsPort int) {
 	r := prometheus.NewRegistry()
 	r.MustRegister(HealthLatency)
+	r.MustRegister(Baseline)
 	r.MustRegister(LastTenAverage)
 	r.MustRegister(DegradationLevel)
 	r.MustRegister(WindowMeasurements)
