@@ -109,17 +109,20 @@ func (c *Health) Start(out chan bool, in chan string) {
 			latency, err := doCheck(newClient())
 
 			metrics.HealthLatency.Set(float64(latency))
-			c.updateLastTen(latency)
 
 			if err != nil {
 				logrus.Infof("Failed health check: %s", err)
-				out <- false
-			} else if c.healthDegraded() {
-				logrus.Infof("Degraded health: baseline %d ms, last ten: %v", c.baseline, c.lastTen)
+				c.updateLastTen(0) // record as unfilled so the chart isn't distorted
 				out <- false
 			} else {
-				logrus.Debugf("Health check successful")
-				out <- true
+				c.updateLastTen(latency)
+				if c.healthDegraded() {
+					logrus.Infof("Degraded health: baseline %d ms, last ten: %v", c.baseline, c.lastTen)
+					out <- false
+				} else {
+					logrus.Debugf("Health check successful")
+					out <- true
+				}
 			}
 
 			time.Sleep(time.Duration(c.interval) * time.Second)
