@@ -2,6 +2,7 @@ package health
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"time"
@@ -11,10 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	checkURL = "http://example.com"
-	maxWait  = 10 * time.Second
-)
+var maxWait = 10 * time.Second
 
 const (
 	// Number of baseline samples to take and median over.
@@ -35,14 +33,16 @@ type Health struct {
 	interval int
 	baseline int64
 	lastTen  []int64
+	probeURL string
 }
 
 // NewChecker creates health checking service
-func NewChecker(interval int) *Health {
+func NewChecker(interval int, probeURL string) *Health {
 	return &Health{
 		interval: interval,
 		baseline: 0,
 		lastTen:  make([]int64, windowSize),
+		probeURL: probeURL,
 	}
 }
 
@@ -51,11 +51,14 @@ func (c *Health) Start(out chan bool, in chan string) {
 
 	doCheck := func(client http.Client) (int64, error) {
 		start := time.Now()
-		_, err := client.Get(checkURL)
+		resp, err := client.Get(c.probeURL)
 		total := time.Since(start).Milliseconds()
 		if err != nil {
 			return total, err
 		}
+		// Drain and close so the underlying TCP connection is reused.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 		return total, nil
 	}
 
