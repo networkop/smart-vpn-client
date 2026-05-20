@@ -129,7 +129,9 @@ func buildDashData() dashData {
 				slot := -1
 				for _, l := range m.GetLabel() {
 					if l.GetName() == "slot" {
-						fmt.Sscanf(l.GetValue(), "%d", &slot)
+						if _, err := fmt.Sscanf(l.GetValue(), "%d", &slot); err != nil {
+							logrus.Debugf("Web: invalid slot label %q: %s", l.GetValue(), err)
+						}
 					}
 				}
 				if slot >= 0 && slot < 10 {
@@ -226,27 +228,55 @@ var dashTmpl = template.Must(template.New("dash").Funcs(template.FuncMap{
   <style>
     :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--green:#2ea043;--red:#da3633;--yellow:#e3b341;--blue:#1f6feb}
     *{box-sizing:border-box;margin:0;padding:0}
-    body{background:var(--bg);color:var(--text);font-family:ui-monospace,'Cascadia Code','Source Code Pro',monospace;padding:24px;max-width:860px;margin:0 auto}
-    h1{font-size:1rem;font-weight:600;margin-bottom:18px;letter-spacing:.04em}
-    .card{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:16px}
-    .stats{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
-    .stat{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 14px;font-size:.8rem}
-    .stat b{font-weight:600}
+    body{background:var(--bg);color:var(--text);font-family:ui-monospace,'Cascadia Code','Source Code Pro',monospace;padding:20px;max-width:860px;margin:0 auto}
+    h1{font-size:1rem;font-weight:600;margin-bottom:16px;letter-spacing:.04em}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:14px}
+
+    /* stats: wrapping pills, 2-up on narrow screens */
+    .stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:20px}
+    .stat{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:.8rem;display:flex;flex-direction:column;gap:2px}
+    .stat label{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em}
+    .stat b{font-weight:600;font-size:.9rem}
     .green{color:var(--green)}.yellow{color:var(--yellow)}.red{color:var(--red)}
+
+    /* chart */
     .chart-outer{position:relative;height:{{.ChartTotalPx}}px;padding-left:52px;padding-bottom:22px}
-    .chart-inner{position:relative;height:100%;display:flex;align-items:flex-end;gap:5px;border-left:1px solid var(--border);border-bottom:1px solid var(--border)}
+    .chart-inner{position:relative;height:100%;display:flex;align-items:flex-end;gap:4px;border-left:1px solid var(--border);border-bottom:1px solid var(--border)}
     .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;position:relative;height:100%}
     .bar{width:100%;border-radius:2px 2px 0 0}
     .bar.normal{background:var(--green)}.bar.over{background:var(--red)}.bar.empty{background:transparent;height:2px}
-    .slot-label{position:absolute;bottom:-18px;font-size:.65rem;color:var(--muted);user-select:none}
+    .slot-label{position:absolute;bottom:-18px;font-size:.6rem;color:var(--muted);user-select:none}
     .thresh-line{position:absolute;left:0;right:0;border-top:2px dashed var(--yellow);pointer-events:none}
-    .thresh-label{position:absolute;right:2px;top:-16px;font-size:.65rem;color:var(--yellow);white-space:nowrap}
+    .thresh-label{position:absolute;right:2px;top:-16px;font-size:.6rem;color:var(--yellow);white-space:nowrap}
     .y-axis{position:absolute;left:0;top:0;bottom:22px;width:50px}
-    .y-label{position:absolute;right:6px;font-size:.65rem;color:var(--muted);transform:translateY(50%);white-space:nowrap}
-    .btn{background:var(--blue);color:#fff;border:none;border-radius:4px;padding:9px 22px;font-family:inherit;font-size:.9rem;cursor:pointer}
+    .y-label{position:absolute;right:6px;font-size:.6rem;color:var(--muted);transform:translateY(50%);white-space:nowrap}
+
+    /* button — touch-friendly by default */
+    .btn{
+      display:block;width:100%;
+      background:var(--blue);color:#fff;
+      border:none;border-radius:6px;
+      padding:14px;
+      font-family:inherit;font-size:1rem;font-weight:600;
+      cursor:pointer;letter-spacing:.02em;
+      touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+    }
     .btn:hover{background:#388bfd}.btn:active{opacity:.8}
-    .footer{font-size:.72rem;color:var(--muted);margin-top:12px}
+
+    .footer{font-size:.72rem;color:var(--muted);margin-top:12px;text-align:center}
     .footer a{color:var(--muted)}
+
+    /* narrow phones: tighten spacing, shrink y-axis padding */
+    @media(max-width:480px){
+      body{padding:12px}
+      .card{padding:12px}
+      .stats{grid-template-columns:1fr 1fr}
+      .chart-outer{padding-left:40px}
+      .y-axis{width:38px}
+      .y-label{font-size:.55rem}
+      .slot-label{font-size:.55rem}
+      .thresh-label{font-size:.55rem}
+    }
   </style>
 </head>
 <body>
@@ -254,11 +284,11 @@ var dashTmpl = template.Must(template.New("dash").Funcs(template.FuncMap{
 
   <div class="card">
     <div class="stats">
-      <div class="stat">Region <b>{{.Region}}</b></div>
-      <div class="stat">Baseline <b>{{printf "%.0f" .Baseline}}ms</b></div>
-      <div class="stat">Threshold <b>{{printf "%.0f" .Threshold}}ms</b></div>
-      <div class="stat">Latest <b>{{printf "%.0f" .Latency}}ms</b></div>
-      <div class="stat">Over threshold <b class="{{.StatusClass}}">{{printf "%.0f" .FractionPct}}% &mdash; {{.StatusText}}</b></div>
+      <div class="stat"><label>Region</label><b>{{.Region}}</b></div>
+      <div class="stat"><label>Baseline</label><b>{{printf "%.0f" .Baseline}}ms</b></div>
+      <div class="stat"><label>Threshold</label><b>{{printf "%.0f" .Threshold}}ms</b></div>
+      <div class="stat"><label>Latest</label><b>{{printf "%.0f" .Latency}}ms</b></div>
+      <div class="stat"><label>Over threshold</label><b class="{{.StatusClass}}">{{printf "%.0f" .FractionPct}}% &mdash; {{.StatusText}}</b></div>
     </div>
 
     <div class="chart-outer">
