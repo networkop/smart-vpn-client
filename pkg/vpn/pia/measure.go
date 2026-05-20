@@ -81,19 +81,19 @@ func (c *Client) bestHeadend() {
 		// always use preferred when defined
 		if c.preferVPN != "" && r.ID == c.preferVPN {
 
-			logrus.Debugf("Using preferred candidate %s@%d ms", r.ID, (r.latency / time.Millisecond))
+			logrus.Debugf("Using preferred candidate %s@%d ms", r.displayName(), (r.latency / time.Millisecond))
 			bestLatency = r.latency
 			winner = *r
-			winnerURL = r.ID
+			winnerURL = r.displayName()
 			break
 		}
 		// otherwise pick the one with the lowest latency
 		if (r.latency > 0) && (r.latency < bestLatency) {
 
-			logrus.Debugf("New best candidate %s@%d ms", r.ID, (r.latency / time.Millisecond))
+			logrus.Debugf("New best candidate %s@%d ms", r.displayName(), (r.latency / time.Millisecond))
 			bestLatency = r.latency
 			winner = *r
-			winnerURL = r.ID
+			winnerURL = r.displayName()
 		}
 	}
 

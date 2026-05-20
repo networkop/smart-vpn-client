@@ -78,7 +78,7 @@ func (c *Client) discoverAndConnect(out chan string) {
 	}
 
 	if c.winner.connected {
-		out <- c.winner.ID
+		out <- c.winner.displayName()
 	}
 }
 

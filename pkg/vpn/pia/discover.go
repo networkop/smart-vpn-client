@@ -27,7 +27,17 @@ type region struct {
 	Servers   piaServerInfo `json:"servers,omitempty"`
 	latency   time.Duration
 	ID        string        `json:"id,omitempty"`
+	Name      string        `json:"name,omitempty"` // human-readable name, optional in v7
+	Offline   bool          `json:"offline,omitempty"`
 	connected bool
+}
+
+// displayName returns the human-readable name if available, falling back to ID.
+func (r *region) displayName() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return r.ID
 }
 
 type piaServerInfo struct {
@@ -74,6 +84,10 @@ func (c *Client) Discover() error {
 
 	c.Headends = make(map[string]*region)
 	for _, region := range payload.Regions {
+		if region.Offline {
+			logrus.Debugf("Skipping offline region %s", region.displayName())
+			continue
+		}
 		if !c.isIgnored(region) {
 			c.Headends[region.ID] = region
 		}
