@@ -1,6 +1,7 @@
 package health
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"time"
@@ -143,7 +144,8 @@ func (c *Health) healthDegraded() bool {
 	threshold := float64(c.baseline) * degradationFactor
 
 	var exceeded, valid int
-	for _, ms := range c.lastTen {
+	for i, ms := range c.lastTen {
+		metrics.WindowMeasurements.WithLabelValues(fmt.Sprintf("%d", i)).Set(float64(ms))
 		if ms == 0 {
 			continue // unfilled slot
 		}
