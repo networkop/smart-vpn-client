@@ -3,126 +3,130 @@ package wg
 import (
 	"fmt"
 
-	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 
 const (
-	defaultRulePrio  = 50
-	mainRouteTable   = 254
-	defaultRouteTable = 59989
-	defaultFwMark    = 59989
+	// mainRouteTable is the kernel's main routing table (RT_TABLE_MAIN).
+	mainRouteTable = 254
+	// wgRouteTable is the custom routing table used exclusively for WireGuard
+	// traffic. All internet-bound packets are steered here by IP policy rules,
+	// leaving the main table's default route via eth0 untouched.
+	wgRouteTable = 51820
+
+	// localRulePrio is evaluated before defaultRulePrio. It consults the main
+	// table but suppresses any default (prefix-length 0) routes, so local-subnet
+	// and WireGuard-endpoint bypass routes (/32) are still matched without the
+	// main default route competing with the VPN default route.
+	localRulePrio = 100
+	// defaultRulePrio steers all remaining traffic into the WireGuard table.
+	defaultRulePrio = 1000
 )
 
-func (t *Tunnel) ensureRules() error {
-
-	defaultRule := t.getDefaultRule()
-	localRule := t.getLocalRule()
-
-	if defaultRule != nil && localRule != nil {
-		return nil
-	}
-
-	if err := t.addDefaultRule(); err != nil {
-		return err
-	}
-
-	if err := t.addLocalRule(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// ip rule for all default route traffic
-func (t *Tunnel) addDefaultRule() error {
-	nlRule := netlink.NewRule()
-	nlRule.Priority = defaultRulePrio
-	nlRule.Family = netlink.FAMILY_V4
-	nlRule.Invert = true
-	nlRule.Mark = uint32(defaultFwMark)
-	nlRule.Table = defaultRouteTable
-
-	err := netlink.RuleAdd(nlRule)
-	if err != nil {
-		return fmt.Errorf("RuleAdd %+v: %s", nlRule, err)
-	}
-	return nil
-}
-
-// ip rule for all non-default routes (e.g. local subnets)
+// addLocalRule installs:
+//
+//	ip rule add priority 100 lookup main suppress_prefixlength 0
+//
+// This allows specific routes in the main table (e.g. the /32 bypass for the
+// WireGuard endpoint) to be matched while suppressing the main default route.
 func (t *Tunnel) addLocalRule() error {
-	nlRule := netlink.NewRule()
-	nlRule.Family = netlink.FAMILY_V4
-	nlRule.Table = mainRouteTable
-	nlRule.Priority = defaultRulePrio - 1
-	nlRule.SuppressPrefixlen = 0
-
-	err := netlink.RuleAdd(nlRule)
-	if err != nil {
-		return fmt.Errorf("RuleAdd (local traffic) %+v: %s", nlRule, err)
+	rule := netlink.NewRule()
+	rule.Priority = localRulePrio
+	rule.Table = mainRouteTable
+	rule.SuppressPrefixlen = 0
+	if err := netlink.RuleAdd(rule); err != nil {
+		return fmt.Errorf("RuleAdd local: %w", err)
 	}
 	return nil
 }
 
-func (t *Tunnel) getDefaultRule() *netlink.Rule {
-	rules, err := netlink.RuleList(netlink.FAMILY_V4)
-	if err != nil {
+// delLocalRule removes the rule installed by addLocalRule.
+func (t *Tunnel) delLocalRule() error {
+	rule := t.getLocalRule()
+	if rule == nil {
 		return nil
 	}
-	for _, rule := range rules {
-		if rule.Priority == defaultRulePrio && rule.Mark == uint32(defaultFwMark) {
-			return &rule
-		}
+	if err := netlink.RuleDel(rule); err != nil {
+		return fmt.Errorf("RuleDel local: %w", err)
 	}
 	return nil
 }
 
+// getLocalRule returns the local rule if it exists, nil otherwise.
 func (t *Tunnel) getLocalRule() *netlink.Rule {
 	rules, err := netlink.RuleList(netlink.FAMILY_V4)
 	if err != nil {
 		return nil
 	}
-	for _, rule := range rules {
-		if rule.Priority == defaultRulePrio-1 && rule.SuppressPrefixlen == 0 {
-			return &rule
+	for i, r := range rules {
+		if r.Priority == localRulePrio && r.Table == mainRouteTable && r.SuppressPrefixlen == 0 {
+			return &rules[i]
 		}
 	}
 	return nil
 }
 
+// addDefaultRule installs:
+//
+//	ip rule add priority 1000 lookup 51820
+//
+// All traffic not matched by higher-priority rules is routed through the
+// WireGuard table, which holds a default route via wg-pia.
+func (t *Tunnel) addDefaultRule() error {
+	rule := netlink.NewRule()
+	rule.Priority = defaultRulePrio
+	rule.Table = wgRouteTable
+	if err := netlink.RuleAdd(rule); err != nil {
+		return fmt.Errorf("RuleAdd default: %w", err)
+	}
+	return nil
+}
+
+// delDefaultRule removes the rule installed by addDefaultRule.
 func (t *Tunnel) delDefaultRule() error {
-	if rule := t.getDefaultRule(); rule != nil {
-		return netlink.RuleDel(rule)
+	rule := t.getDefaultRule()
+	if rule == nil {
+		return nil
 	}
-
-	logrus.Debugf("Rule does not exist, nothing to do")
+	if err := netlink.RuleDel(rule); err != nil {
+		return fmt.Errorf("RuleDel default: %w", err)
+	}
 	return nil
 }
 
-func (t *Tunnel) delLocalRule() error {
-	if rule := t.getLocalRule(); rule != nil {
-		return netlink.RuleDel(rule)
+// getDefaultRule returns the default rule if it exists, nil otherwise.
+func (t *Tunnel) getDefaultRule() *netlink.Rule {
+	rules, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return nil
 	}
-
-	logrus.Debugf("Rule does not exist, nothing to do")
+	for i, r := range rules {
+		if r.Priority == defaultRulePrio && r.Table == wgRouteTable {
+			return &rules[i]
+		}
+	}
 	return nil
 }
 
+// ensureRules idempotently installs both ip rules. Safe to call on reconnect.
+func (t *Tunnel) ensureRules() error {
+	if t.getLocalRule() == nil {
+		if err := t.addLocalRule(); err != nil {
+			return err
+		}
+	}
+	if t.getDefaultRule() == nil {
+		if err := t.addDefaultRule(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// delRules removes both ip rules. Called during Cleanup.
 func (t *Tunnel) delRules() error {
-	var returnErr error
-	if defaultRule := t.getDefaultRule(); defaultRule != nil {
-		err := t.delDefaultRule()
-		if err != nil {
-			returnErr = fmt.Errorf("Failed to delDefaultRule: %s", err)
-		}
+	if err := t.delLocalRule(); err != nil {
+		return err
 	}
-	if localRule := t.getLocalRule(); localRule != nil {
-		err := t.delLocalRule()
-		if err != nil {
-			returnErr = fmt.Errorf("%w; Failed to delLocalRule: %s", returnErr, err)
-		}
-	}
-
-	return returnErr
+	return t.delDefaultRule()
 }

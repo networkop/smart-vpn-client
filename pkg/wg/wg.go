@@ -57,6 +57,9 @@ func New() (*Tunnel, error) {
 
 func (t *Tunnel) Cleanup() {
 	t.delBypassRoute()
+	if err := t.delRules(); err != nil {
+		logrus.Debugf("delRules during cleanup: %s", err)
+	}
 	t.link = t.getWgLink()
 	if t.link != nil {
 		if err := t.delWgLink(); err != nil {

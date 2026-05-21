@@ -8,16 +8,16 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-// EnsureRouting sets up the routes needed for the VPN tunnel:
+// EnsureRouting sets up the routes and policy rules needed for the VPN tunnel:
 //
 //  1. A host route for the tunnel gateway IP (nexthop/32) via wg-pia.
 //  2. A bypass host route for the WireGuard server's external endpoint IP,
 //     via the current ISP gateway. This prevents WireGuard's own encrypted
 //     UDP traffic from being routed back into the tunnel (routing loop).
-//  3. A default route (0.0.0.0/0) in the main routing table via wg-pia,
-//     so all downstream traffic is forwarded through the VPN.
-//
-// No custom routing tables or ip rules are used.
+//  3. A default route (0.0.0.0/0) in the WireGuard routing table (51820) via
+//     wg-pia. The main table's default route via eth0 is left untouched.
+//  4. IP policy rules that steer all internet traffic into the WireGuard table
+//     while still allowing local-subnet and bypass routes in the main table.
 func (t *Tunnel) EnsureRouting(nexthop string) error {
 
 	nhCIDR := fmt.Sprintf("%s/32", nexthop)
@@ -45,13 +45,20 @@ func (t *Tunnel) EnsureRouting(nexthop string) error {
 		logrus.Warnf("EnsureRouting: bypass route for WireGuard endpoint: %s", err)
 	}
 
-	// 3. Default route in the main routing table.
+	// 3. Default route in the WireGuard routing table — not the main table.
+	//    This keeps the eth0 default route intact and avoids EEXIST on reconnect.
 	defaultRoute := netlink.Route{
 		Dst:       &defaultIPv4Net,
 		LinkIndex: t.link.Attrs().Index,
+		Table:     wgRouteTable,
 	}
-	if err = netlink.RouteAdd(&defaultRoute); err != nil {
+	if err = netlink.RouteReplace(&defaultRoute); err != nil {
 		return fmt.Errorf("RouteAdd default: %s", err)
+	}
+
+	// 4. Install IP policy rules that steer traffic into the WireGuard table.
+	if err = t.ensureRules(); err != nil {
+		return fmt.Errorf("ensureRules: %s", err)
 	}
 
 	return nil
@@ -77,7 +84,8 @@ func (t *Tunnel) addBypassRoute() error {
 		Gw:        current.Gw,
 		LinkIndex: current.LinkIndex,
 	}
-	if err = netlink.RouteAdd(bypass); err != nil {
+	// RouteReplace handles reconnects where the bypass route already exists.
+	if err = netlink.RouteReplace(bypass); err != nil {
 		return fmt.Errorf("RouteAdd bypass(%s): %s", t.endpoint, err)
 	}
 	logrus.Debugf("Added bypass route for WireGuard endpoint %s", t.endpoint)
@@ -105,9 +113,9 @@ func (t *Tunnel) checkRouting() error {
 		}
 	}
 
-	// Check that the main routing table has a default route via wg-pia.
+	// Check that the WireGuard routing table has a default route via wg-pia.
 	filter := &netlink.Route{
-		Table:     mainRouteTable,
+		Table:     wgRouteTable,
 		LinkIndex: t.link.Attrs().Index,
 	}
 	routes, err := netlink.RouteListFiltered(
@@ -115,14 +123,17 @@ func (t *Tunnel) checkRouting() error {
 		netlink.RT_FILTER_TABLE|netlink.RT_FILTER_OIF,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to list routes in main table: %w", err)
+		return fmt.Errorf("failed to list routes in wg table: %w", err)
 	}
 
 	for _, route := range routes {
 		if route.Dst == nil || route.Dst.String() == "0.0.0.0/0" {
+			if t.getLocalRule() == nil || t.getDefaultRule() == nil {
+				return fmt.Errorf("ip policy rules not configured")
+			}
 			return nil
 		}
 	}
 
-	return fmt.Errorf("no default route found in main table via %s", t.intfName)
+	return fmt.Errorf("no default route found in wg table via %s", t.intfName)
 }
