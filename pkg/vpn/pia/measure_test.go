@@ -37,7 +37,7 @@ func TestBestHeadend(t *testing.T) {
 		"b": buildFakeRegion("b", 3*time.Second),
 		"c": buildFakeRegion("c", 2*time.Second),
 	}
-	c.bestHeadend()
+	c.bestHeadend("")
 	if !equalRegions(c.winner, buildFakeRegion("a", 1*time.Second)) {
 		t.Fatalf("Wrong best headend")
 	}

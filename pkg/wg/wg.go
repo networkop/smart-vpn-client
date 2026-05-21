@@ -12,10 +12,8 @@ import (
 )
 
 var (
-	wgInterface       = "wg-pia"
-	defaultRouteTable = 59989
-	defaultFwMark     = 59989
-	defaultKeepalive  = 15 * time.Second
+	wgInterface      = "wg-pia"
+	defaultKeepalive = 15 * time.Second
 )
 
 var defaultIPv4Net = net.IPNet{
@@ -29,9 +27,11 @@ type Tunnel struct {
 	RemoteAddress net.IPNet
 	keepalive     time.Duration
 	wgClient      *wgctrl.Client
-	routeTableID  int
-	fwMark        int
 	link          netlink.Link
+	// endpoint is the WireGuard server's external IP, stored so EnsureRouting
+	// can add a bypass host route to prevent the encrypted UDP traffic from
+	// being routed back into the tunnel.
+	endpoint net.IP
 }
 
 func New() (*Tunnel, error) {
@@ -51,22 +51,18 @@ func New() (*Tunnel, error) {
 		PrivateKey:    key,
 		RemoteAddress: defaultIPv4Net,
 		keepalive:     defaultKeepalive,
-		routeTableID:  defaultRouteTable,
-		fwMark:        defaultFwMark,
 		wgClient:      wgClient,
 	}, nil
 }
 
 func (t *Tunnel) Cleanup() {
+	t.delBypassRoute()
 	t.link = t.getWgLink()
 	if t.link != nil {
 		if err := t.delWgLink(); err != nil {
 			logrus.Errorf("Error deleting link: %s", err)
 			return
 		}
-	}
-	if err := t.delRules(); err != nil {
-		logrus.Infof("Error delRules: %s", err)
 	}
 	if _, err := t.delIPtables(); err != nil {
 		logrus.Debugf("delIPtables during cleanup: %s", err)
@@ -109,6 +105,7 @@ func (t *Tunnel) Up(remote, key, peerIP string) error {
 	if err != nil {
 		return err
 	}
+	t.endpoint = udpAddr.IP.To4()
 
 	parsedKey, err := wgtypes.ParseKey(key)
 	if err != nil {
@@ -116,8 +113,7 @@ func (t *Tunnel) Up(remote, key, peerIP string) error {
 	}
 
 	cfg := wgtypes.Config{
-		PrivateKey:   &t.PrivateKey,
-		FirewallMark: intPtr(defaultFwMark),
+		PrivateKey: &t.PrivateKey,
 		Peers: []wgtypes.PeerConfig{
 			{
 				PublicKey:                   parsedKey,
@@ -141,5 +137,3 @@ func (t *Tunnel) Up(remote, key, peerIP string) error {
 
 	return nil
 }
-
-func intPtr(v int) *int { return &v }

@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	defaultRulePrio = 50
-	mainRouteTable  = 254
+	defaultRulePrio  = 50
+	mainRouteTable   = 254
+	defaultRouteTable = 59989
+	defaultFwMark    = 59989
 )
 
 func (t *Tunnel) ensureRules() error {
