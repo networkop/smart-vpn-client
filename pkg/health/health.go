@@ -103,6 +103,7 @@ func (c *Health) Start(out chan bool, in chan string) {
 			threshold := float64(c.baseline) * degradationFactor
 			metrics.HealthLatency.Set(float64(c.baseline))
 			metrics.Baseline.Set(float64(c.baseline))
+			metrics.DegradationLevel.Reset()
 			metrics.DegradationLevel.With(prometheus.Labels{"best": winner}).Set(threshold)
 			logrus.Infof("New baseline is %d ms (median of %d samples); threshold is %.0f ms",
 				c.baseline, len(samples), threshold)
