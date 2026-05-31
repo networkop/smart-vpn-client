@@ -12,7 +12,6 @@ import (
 var (
 	defaultMeasureMaxWait = 1 * time.Second
 	defaultMaxBestLatency = 10 * time.Second
-	// lock                  = sync.RWMutex{}
 )
 
 // Measure latency to discovered headends
@@ -25,12 +24,16 @@ func (c *Client) Measure() {
 		return d.Dial
 	}(d)
 
-	for id, r := range c.Headends {
+	for _, r := range c.Headends {
 
 		wg.Add(1)
 
-		go func(id string, r *region, wg *sync.WaitGroup) {
+		go func(r *region, wg *sync.WaitGroup) {
 			defer wg.Done()
+
+			// Take the lowest reachable latency across the region's WG
+			// servers rather than letting the last server win.
+			var best time.Duration
 			for _, server := range r.Servers.WG {
 
 				url := fmt.Sprintf("%s:%d", server.IP, defaultHeadendPort)
@@ -39,24 +42,21 @@ func (c *Client) Measure() {
 				_, err := doConn("tcp", url)
 				if err != nil {
 					logrus.Debugf("Failed to connect to wireguard headend %s: %s", server.CN, err)
-				} else {
-
-					total := time.Since(start)
-
-					logrus.Debugf("Latency to %s was %d ms", server.CN, r.latency/time.Millisecond)
-
-					r.latency = total
-
-					logrus.Debugf("Latency to %s now %d ms", server.CN, r.latency/time.Millisecond)
+					continue
 				}
 
+				total := time.Since(start)
+				if best == 0 || total < best {
+					best = total
+				}
+				logrus.Debugf("Latency to %s was %d ms (region best %d ms)", server.CN, total/time.Millisecond, best/time.Millisecond)
 			}
 
-			//lock.Lock()
-			//c.Headends[id] = r
-			//lock.Unlock()
+			if best > 0 {
+				r.latency = best
+			}
 
-		}(id, r, &wg)
+		}(r, &wg)
 
 	}
 
@@ -64,10 +64,13 @@ func (c *Client) Measure() {
 
 }
 
-// bestHeadend selects the lowest-latency available headend.
-// excludeID, if non-empty, is skipped — used by forced re-election to
-// guarantee a different region is chosen.
-func (c *Client) bestHeadend(excludeID string) {
+// bestHeadend selects the lowest-latency available headend, returning true if
+// one was found. excludeID, if non-empty, is skipped — used by forced
+// re-election to guarantee a different region is chosen. When no candidate is
+// available (all excluded, cooling down, or unreachable) it returns false and
+// leaves c.winner unchanged so the caller can retry on a later tick rather
+// than crashing the daemon.
+func (c *Client) bestHeadend(excludeID string) bool {
 	var winnerURL string
 	var winner region
 	bestLatency := c.maxBestLatency
@@ -103,9 +106,11 @@ func (c *Client) bestHeadend(excludeID string) {
 	}
 
 	if bestLatency == c.maxBestLatency {
-		logrus.Panicf("Failed to find the best VPN headend, something's gone wrong")
+		logrus.Warnf("No available VPN headend found (all excluded, cooling down, or unreachable); will retry")
+		return false
 	}
 
 	logrus.Infof("Winner is %s with latency %d ms", winnerURL, (bestLatency / time.Millisecond))
 	c.winner = &winner
+	return true
 }

@@ -69,7 +69,9 @@ func (c *Client) discoverAndConnect(out chan string) {
 	}
 
 	c.Measure()
-	c.bestHeadend("")
+	if !c.bestHeadend("") {
+		return
+	}
 
 	err = c.Connect()
 	if err != nil {
@@ -109,7 +111,10 @@ func (c *Client) reelectNext(out chan string) {
 		logrus.Infof("Re-election: excluding current headend %s", c.winner.displayName())
 	}
 
-	c.bestHeadend(excludeID)
+	if !c.bestHeadend(excludeID) {
+		logrus.Infof("Re-election: no alternative headend available, keeping current")
+		return
+	}
 
 	logrus.Infof("Re-election: switching to %s", c.winner.displayName())
 	if err := c.Cleanup(); err != nil {
