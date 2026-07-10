@@ -123,6 +123,9 @@ func (c *Client) reelectNext(out chan string) {
 	if err := c.Connect(); err != nil {
 		logrus.Infof("Re-election connect failed: %s", err)
 		c.failedRegions[c.winner.ID] = time.Now()
+		// Clear the winner so the next health cycle triggers full rediscovery
+		// rather than repeatedly retrying this failed headend.
+		c.winner = nil
 		return
 	}
 	if c.winner.connected {

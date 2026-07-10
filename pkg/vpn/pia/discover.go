@@ -13,6 +13,10 @@ import (
 const (
 	piaV4discoveryURL  = "https://serverlist.piaservers.net/vpninfo/servers/v7"
 	piaV4payloadSigLen = 350
+	// discoverTimeout is generous because discovery traffic traverses the VPN
+	// tunnel, which may be slow (but working) at the moment a reconnect is
+	// triggered. A short timeout here causes a reconnect loop on a degraded link.
+	discoverTimeout = 15 * time.Second
 )
 
 var (
@@ -58,7 +62,10 @@ func (c *Client) Discover() error {
 		return err
 	}
 
-	res, err := c.http.Do(req)
+	// Use a dedicated client with a generous timeout rather than c.http
+	// (2s), since discovery traffic goes through the tunnel.
+	client := http.Client{Timeout: discoverTimeout}
+	res, err := client.Do(req)
 	if err != nil {
 		return err
 	}
