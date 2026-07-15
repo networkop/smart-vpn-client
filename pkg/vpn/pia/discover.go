@@ -1,9 +1,11 @@
 package pia
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -54,6 +56,26 @@ type piaServer struct {
 	CN string `json:"cn"`
 }
 
+// discoverClient is built once and reused. Creating a new http.Client (and
+// therefore a new http.Transport) per request leaks the transport's connection
+// pool: each abandoned transport keeps its sockets and their readLoop/writeLoop
+// goroutines alive, which accumulate until new requests are multiplexed onto
+// dead HTTP/2 connections and hang until the client timeout.
+//
+// Dials tcp4 only: serverlist.piaservers.net publishes AAAA records and the
+// container has no working IPv6 path off-box.
+var discoverClient = &http.Client{
+	Timeout: discoverTimeout,
+	Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp4", addr)
+		},
+		MaxIdleConns:        4,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     30 * time.Second,
+	},
+}
+
 // Discover PIA VPN headends
 func (c *Client) Discover() error {
 	logrus.Info("Discovering VPN headends for PIA")
@@ -62,10 +84,7 @@ func (c *Client) Discover() error {
 		return err
 	}
 
-	// Use a dedicated client with a generous timeout rather than c.http
-	// (2s), since discovery traffic goes through the tunnel.
-	client := http.Client{Timeout: discoverTimeout}
-	res, err := client.Do(req)
+	res, err := discoverClient.Do(req)
 	if err != nil {
 		return err
 	}

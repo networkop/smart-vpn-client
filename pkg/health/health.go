@@ -34,6 +34,11 @@ type Health struct {
 	baseline int64
 	lastTen  []int64
 	probeURL string
+	// client is built once and reused for every probe. Creating a new
+	// http.Client (or cloning http.DefaultTransport) per check leaks the
+	// transport's connection pool: each abandoned transport keeps its sockets
+	// and their readLoop/writeLoop goroutines alive indefinitely.
+	client *http.Client
 }
 
 // NewChecker creates health checking service
@@ -43,30 +48,37 @@ func NewChecker(interval int, probeURL string) *Health {
 		baseline: 0,
 		lastTen:  make([]int64, windowSize),
 		probeURL: probeURL,
+		client: &http.Client{
+			Timeout: maxWait,
+			Transport: &http.Transport{
+				MaxIdleConns:        4,
+				MaxIdleConnsPerHost: 2,
+				IdleConnTimeout:     30 * time.Second,
+			},
+		},
 	}
 }
 
 // Start a periodic healthCheck loop
 func (c *Health) Start(out chan bool, in chan string) {
 
-	doCheck := func(client http.Client) (int64, error) {
+	doCheck := func() (int64, error) {
 		start := time.Now()
-		resp, err := client.Get(c.probeURL)
+		resp, err := c.client.Get(c.probeURL)
 		total := time.Since(start).Milliseconds()
 		if err != nil {
+			// resp is nil on most errors, but not all — close it if present
+			// so the connection isn't leaked.
+			if resp != nil && resp.Body != nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+			}
 			return total, err
 		}
 		// Drain and close so the underlying TCP connection is reused.
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 		return total, nil
-	}
-
-	newClient := func() http.Client {
-		return http.Client{
-			Timeout:   maxWait,
-			Transport: http.DefaultTransport.(*http.Transport).Clone(),
-		}
 	}
 
 	for {
@@ -86,7 +98,7 @@ func (c *Health) Start(out chan bool, in chan string) {
 				if i > 0 {
 					time.Sleep(time.Duration(c.interval) * time.Second)
 				}
-				latency, err := doCheck(newClient())
+				latency, err := doCheck()
 				if err != nil {
 					logrus.Infof("Failed baseline sample %d: %s", i+1, err)
 					continue
@@ -110,7 +122,7 @@ func (c *Health) Start(out chan bool, in chan string) {
 
 		default:
 			logrus.Debugf("Periodic health checking")
-			latency, err := doCheck(newClient())
+			latency, err := doCheck()
 
 			metrics.HealthLatency.Set(float64(latency))
 
