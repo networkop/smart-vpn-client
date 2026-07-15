@@ -24,7 +24,7 @@ var (
 	vpnPass     = flag.String("pwd", "", "VPN Password")
 	maxFail     = flag.Int("fails", 3, "Maximum number of failed healthchecks before reconnect")
 	healthInt   = flag.Int("health", 10, "health-checking interval (sec)")
-	probeURL    = flag.String("probe", "http://1.1.1.1", "URL to probe for health checks")
+	probeURL    = flag.String("probe", "http://cp.cloudflare.com/generate_204", "URL to probe for health checks")
 	ignoreVPNs  = flag.String("ignore", "", `A comma-separated list of VPN headends to ignore, e.g. "--ignore=uk_2"`)
 	preferVPN   = flag.String("prefer", "", "VPN headend to prefer")
 	latencyInt  = flag.Int("best", 30, "best VPN headend interval (sec)")

@@ -50,6 +50,13 @@ func NewChecker(interval int, probeURL string) *Health {
 		probeURL: probeURL,
 		client: &http.Client{
 			Timeout: maxWait,
+			// Don't follow redirects: a probe should measure a single
+			// request/response, not a redirect chain. Following them silently
+			// turns the measurement into something else entirely (extra RTTs,
+			// TLS handshakes, and a different endpoint than configured).
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Transport: &http.Transport{
 				MaxIdleConns:        4,
 				MaxIdleConnsPerHost: 2,
