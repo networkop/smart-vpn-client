@@ -18,23 +18,26 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      # golangci-lint-action downloads a matched prebuilt release binary
-      # instead of `go install`-ing from source against whatever toolchain
-      # happens to be active. `go install @latest` can resolve a release
-      # built against an older x/tools that only decodes export-data format
-      # v2, while a newer Go toolchain emits v4 — producing:
-      #   "export data version 4 is greater than maximum supported version 2"
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      # Build golangci-lint from source with the runner's own ambient (stable)
+      # Go toolchain rather than golangci-lint-action's prebuilt release
+      # binary. golangci-lint's official releases are built with a fixed,
+      # often-lagging Go version (e.g. go1.24 for v1.64.8); recent releases
+      # refuse to run when go.mod's `go` directive exceeds their own build
+      # version ("the Go language version used to build golangci-lint is
+      # lower than the targeted Go version"). Building from source keeps the
+      # build-Go-version pinned to whatever this runner's Go actually is, so
+      # it can never lag behind go.mod.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - name: Run linter via Makefile
+        run: make lint
 
   unit-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Matches go.mod's `go 1.26` directive; a lower pinned version here
-      # relies on Go's toolchain auto-switch to silently fetch 1.26 anyway.
+      # Matches (or exceeds) go.mod's `go` directive; a lower pinned version
+      # here relies on Go's toolchain auto-switch to silently fetch it anyway.
       - uses: actions/setup-go@v5
         with:
           go-version: stable
