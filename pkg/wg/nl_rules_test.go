@@ -23,9 +23,11 @@ func TestRules(t *testing.T) {
 	// starts from a known state.
 	_ = wg.delLocalRule()
 	_ = wg.delDefaultRule()
+	_ = wg.delDiscoveryRule()
 	t.Cleanup(func() {
 		_ = wg.delLocalRule()
 		_ = wg.delDefaultRule()
+		_ = wg.delDiscoveryRule()
 	})
 
 	tests := []struct {
@@ -56,6 +58,28 @@ func TestRules(t *testing.T) {
 			name:          "fourth",
 			changeCommand: wg.delDefaultRule,
 			getCommand:    wg.getDefaultRule,
+			wantRule:      false,
+		},
+		{
+			name:          "fifth",
+			changeCommand: wg.addDiscoveryRule,
+			getCommand:    wg.getDiscoveryRule,
+			wantRule:      true,
+		},
+		{
+			name: "sixth",
+			changeCommand: func() error {
+				// EnsureDiscoveryBypass must be a no-op when the rule already
+				// exists rather than erroring on a duplicate RuleAdd.
+				return wg.EnsureDiscoveryBypass()
+			},
+			getCommand: wg.getDiscoveryRule,
+			wantRule:   true,
+		},
+		{
+			name:          "seventh",
+			changeCommand: wg.delDiscoveryRule,
+			getCommand:    wg.getDiscoveryRule,
 			wantRule:      false,
 		},
 	}
