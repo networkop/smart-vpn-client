@@ -99,6 +99,12 @@ func reduceByOne(i int) int {
 // reelectNext re-runs discovery, measurement and headend selection,
 // always excluding the current headend so a different region is guaranteed.
 func (c *Client) reelectNext(out chan string) {
+	// Discovery is routed via wg.DiscoveryMark, bypassing the tunnel
+	// regardless of its health (see discover.go), so a failure here is a
+	// genuine discovery-endpoint problem (outage, DNS blip) rather than a
+	// dead tunnel — retrying by tearing down a possibly-healthy connection
+	// would not help. Leave the current connection alone and let the next
+	// re-election attempt retry.
 	if err := c.Discover(); err != nil {
 		logrus.Infof("Re-election: discover failed: %s", err)
 		return

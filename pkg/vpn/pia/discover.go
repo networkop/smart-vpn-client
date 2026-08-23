@@ -7,9 +7,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"syscall"
 	"time"
 
+	"github.com/networkop/smart-vpn-client/pkg/wg"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -62,13 +65,31 @@ type piaServer struct {
 // goroutines alive, which accumulate until new requests are multiplexed onto
 // dead HTTP/2 connections and hang until the client timeout.
 //
+// Every socket is tagged with wg.DiscoveryMark (SO_MARK), which the
+// discovery-bypass ip rule (see wg.Tunnel.EnsureDiscoveryBypass) routes via
+// the main table's native default route instead of the WireGuard tunnel.
+// This keeps discovery working even when the tunnel is up but dead at the
+// headend, since it no longer depends on the tunnel carrying traffic at all.
+//
 // Dials tcp4 only: serverlist.piaservers.net publishes AAAA records and the
 // container has no working IPv6 path off-box.
 var discoverClient = &http.Client{
 	Timeout: discoverTimeout,
 	Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
-			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp4", addr)
+			d := net.Dialer{
+				Timeout: 5 * time.Second,
+				Control: func(_, _ string, c syscall.RawConn) error {
+					var sockErr error
+					if err := c.Control(func(fd uintptr) {
+						sockErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, wg.DiscoveryMark)
+					}); err != nil {
+						return err
+					}
+					return sockErr
+				},
+			}
+			return d.DialContext(ctx, "tcp4", addr)
 		},
 		MaxIdleConns:        4,
 		MaxIdleConnsPerHost: 2,
@@ -79,6 +100,16 @@ var discoverClient = &http.Client{
 // Discover PIA VPN headends
 func (c *Client) Discover() error {
 	logrus.Info("Discovering VPN headends for PIA")
+
+	// Idempotent and independent of tunnel state: guarantees the bypass rule
+	// is in place even if Discover is called before any Connect has run, or
+	// something external removed it.
+	if c.wg != nil {
+		if err := c.wg.EnsureDiscoveryBypass(); err != nil {
+			return fmt.Errorf("Failed to ensure discovery bypass route: %s", err)
+		}
+	}
+
 	req, err := http.NewRequest(http.MethodGet, piaV4discoveryURL, nil)
 	if err != nil {
 		return err
