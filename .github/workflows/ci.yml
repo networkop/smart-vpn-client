@@ -6,6 +6,18 @@ on:
   pull_request:
     branches: [ main ]
 
+# Go and golangci-lint versions are pinned exactly (not "stable"/"latest")
+# and kept in sync across both jobs. Floating either one independently has
+# repeatedly broken the lint job: golangci-lint's export-data decoder (via
+# its pinned x/tools) and whatever Go version produces that export data
+# must agree on the export format version, and that compatibility window
+# is not guaranteed to track "whatever is newest today" on either side.
+# Bump GO_VERSION/GOLANGCI_LINT_VERSION together, deliberately, and confirm
+# `make lint` passes locally with that exact pair before pushing.
+env:
+  GO_VERSION: '1.26.3'
+  GOLANGCI_LINT_VERSION: 'v1.64.8'
+
 jobs:
   # Linting is in a separate job because golangci-lint is quite slow when
   # running it in cold-start mode.
@@ -17,18 +29,12 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
-      # Build golangci-lint from source with the runner's own ambient (stable)
-      # Go toolchain rather than golangci-lint-action's prebuilt release
-      # binary. golangci-lint's official releases are built with a fixed,
-      # often-lagging Go version (e.g. go1.24 for v1.64.8); recent releases
-      # refuse to run when go.mod's `go` directive exceeds their own build
-      # version ("the Go language version used to build golangci-lint is
-      # lower than the targeted Go version"). Building from source keeps the
-      # build-Go-version pinned to whatever this runner's Go actually is, so
-      # it can never lag behind go.mod.
+          go-version: ${{ env.GO_VERSION }}
+      # Built from source, pinned to the exact tag above and compiled with
+      # the exact Go version above, so the pairing is deterministic instead
+      # of "whatever @latest and stable happen to resolve to today".
       - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@${{ env.GOLANGCI_LINT_VERSION }}
       - name: Run linter via Makefile
         run: make lint
 
@@ -36,9 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Matches (or exceeds) go.mod's `go` directive; a lower pinned version
-      # here relies on Go's toolchain auto-switch to silently fetch it anyway.
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: ${{ env.GO_VERSION }}
       - run: make test
