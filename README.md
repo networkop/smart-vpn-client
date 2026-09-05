@@ -53,6 +53,8 @@ sudo VPN_PWD=<VPN_PASSWORD> ./smart-vpn-client -user <VPN_USERNAME>
 | `-metrics` | `2112` | Port for the Prometheus `/metrics` endpoint and `/api/next` control endpoint (binds to all interfaces) |
 | `-web` | `8080` | Port for the HTML dashboard (binds to eth0 only by default) |
 | `-web-iface` | `eth0` | Interface whose first IPv4 address the dashboard binds to |
+| `-bypass-mark` | `0` (disabled) | fwmark set by a companion proxy on traffic that must skip the tunnel, e.g. `0x51821`. See [Split-tunnel bypass](#split-tunnel-bypass) |
+| `-bypass-table` | `51821` | Routing table holding the native default route used by bypassed traffic |
 | `-cleanup` | `false` | Tear down all VPN configuration (routes, rules, interface) and exit. No credentials required |
 | `-debug` | `false` | Enable debug-level logging |
 | `-v` | `false` | Print the build version and exit |
@@ -129,10 +131,58 @@ The client uses Linux IP policy routing to forward traffic through the WireGuard
 | Default route via `wg-pia` | Custom table 51820 | Added on connect, removed with the link |
 | Bypass route for VPN endpoint `/32` | Main table via eth0 | Prevents the encrypted UDP stream from looping back into the tunnel |
 | `ip rule` priority 100 | `lookup main suppress_prefixlength 0` | Matches specific routes (e.g. the bypass `/32`) in the main table, but ignores its default route |
+| `ip rule` priority 150 | `fwmark <mark> lookup <table>` | Optional split-tunnel bypass; only installed when `-bypass-mark` is set |
 | `ip rule` priority 1000 | `lookup 51820` | Steers all remaining traffic into the WireGuard table |
 | Default route via eth0 | Main table | **Left untouched** |
 
-On cleanup, both `ip rule` entries and the bypass route are removed. The table 51820 default route is removed automatically by the kernel when the `wg-pia` interface is deleted.
+On cleanup, the `ip rule` entries and the bypass route are removed. The table 51820 default route is removed automatically by the kernel when the `wg-pia` interface is deleted.
+
+## Split-tunnel bypass
+
+A companion process — for example [`envoy-split-proxy`](docs/vpn-agent-integration.md) — may want selected traffic to leave via the native interface rather than the tunnel. It marks its own upstream sockets with `SO_MARK`; this client turns that mark into a routing decision.
+
+Start it with a mark and the feature switches on:
+
+```
+sudo VPN_PWD=<VPN_PASSWORD> ./smart-vpn-client -user <VPN_USERNAME> -bypass-mark 0x51821
+```
+
+That installs an `ip rule` at priority 150 matching the mark, plus a default route via the native gateway in table 51821 (`-bypass-table`):
+
+```
+$ ip rule show | grep 150
+150:    from all fwmark 0x51821 lookup 51821
+
+$ ip route show table 51821
+default via 172.16.0.1 dev eth0
+
+# marked traffic goes direct...
+$ ip route get 1.1.1.1 mark 0x51821
+1.1.1.1 via 172.16.0.1 dev eth0 table 51821
+
+# ...unmarked traffic still uses the tunnel
+$ ip route get 1.1.1.1
+1.1.1.1 dev wg-pia table 51820 src 10.31.196.44
+
+# and LAN destinations are unaffected, matched at priority 100
+$ ip route get 172.16.0.1 mark 0x51821
+172.16.0.1 dev eth0
+```
+
+Priority 150 is deliberate: below the `suppress_prefixlength` rule so LAN destinations still resolve from the main table, above the catch-all so marked traffic beats the tunnel.
+
+The gateway and interface are taken from the main table's default route, so the bypass follows the native path rather than a hardcoded one. The rule and route are reinstalled idempotently on every reconnect, and both are removed by `-cleanup`.
+
+**Observability.** Without the rule, marked traffic still works — it just goes through the tunnel and gets masqueraded to the VPN exit address, with nothing to show for it. Two gauges make that state visible:
+
+| Metric | Meaning |
+|---|---|
+| `vpn_bypass_enabled` | 1 when `-bypass-mark` is set |
+| `vpn_bypass_rule_present` | 1 when the `ip rule` **and** the table's default route are both installed |
+
+`vpn_bypass_enabled == 1 and vpn_bypass_rule_present == 0` is the state worth alerting on. The same appears on the dashboard as a **Split bypass** field reading `OFF` / `ACTIVE` / `MISSING`, and is logged at WARN when the rule is missing after a reconnect.
+
+Note that `SO_MARK` requires `CAP_NET_ADMIN` in the process setting the mark — the proxy, not this client.
 
 ## Tests
 

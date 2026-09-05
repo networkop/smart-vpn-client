@@ -49,6 +49,25 @@ var (
 	},
 		[]string{"slot"},
 	)
+	// BypassEnabled is 1 whenever -bypass-mark is set, regardless of whether
+	// the rules are currently installed. Paired with BypassRulePresent it
+	// separates "the split-tunnel bypass is switched off" from "it is switched
+	// on but not working", which otherwise look identical from outside.
+	BypassEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "bypass",
+		Name:      "enabled",
+		Help:      "1 when a split-tunnel bypass fwmark is configured",
+	})
+	// BypassRulePresent is 1 only when both halves of the bypass are in place:
+	// the ip rule matching the fwmark and the bypass table's default route.
+	// Either one alone diverts nothing.
+	BypassRulePresent = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "bypass",
+		Name:      "rule_present",
+		Help:      "1 when the bypass ip rule and the bypass table default route are both installed",
+	})
 )
 
 func init() {
@@ -57,6 +76,8 @@ func init() {
 	Registry.MustRegister(LastTenAverage)
 	Registry.MustRegister(DegradationLevel)
 	Registry.MustRegister(WindowMeasurements)
+	Registry.MustRegister(BypassEnabled)
+	Registry.MustRegister(BypassRulePresent)
 }
 
 // Server starts the Prometheus metrics endpoint and the /api/next control endpoint.

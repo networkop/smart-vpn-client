@@ -27,13 +27,14 @@ type Client struct {
 	maxFailed      int
 	ignores        map[string]struct{}
 	preferVPN      string
+	bypass         wg.BypassConfig
 	measureMaxWait time.Duration
 	maxBestLatency time.Duration
 	winner         *region
 	failedRegions  map[string]time.Time
 	// nextCh is signalled by TriggerNext to request a headend re-election
 	// without tearing down the current connection if the winner is unchanged.
-	nextCh         chan struct{}
+	nextCh chan struct{}
 }
 
 // TriggerNext requests a headend re-election. Non-blocking: if a re-election
@@ -46,7 +47,7 @@ func (c *Client) TriggerNext() {
 }
 
 // NewClient returns new PIA client
-func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string, preferVPN string) (*Client, error) {
+func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string, preferVPN string, bypass wg.BypassConfig) (*Client, error) {
 
 	ignoresMap := make(map[string]struct{})
 	for _, ignore := range ignores {
@@ -63,6 +64,7 @@ func NewClient(user, pwd string, measureInt, maxFailed int, ignores []string, pr
 		maxBestLatency: defaultMaxBestLatency,
 		maxFailed:      maxFailed,
 		preferVPN:      preferVPN,
+		bypass:         bypass,
 		failedRegions:  make(map[string]time.Time),
 		nextCh:         make(chan struct{}, 1),
 	}, nil
@@ -81,7 +83,7 @@ func (c *Client) Init() error {
 }
 
 func (c *Client) initTunnel() error {
-	wgTunnel, err := wg.New()
+	wgTunnel, err := wg.New(c.bypass)
 	if err != nil {
 		return fmt.Errorf("Failed to init wg setup: %s", err)
 	}

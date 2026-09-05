@@ -67,7 +67,7 @@ const chartPx = 200.0
 type barItem struct {
 	Slot     int
 	HeightPx float64
-	Class    string  // "normal" | "over" | "empty"
+	Class    string // "normal" | "over" | "empty"
 	ValueMs  float64
 }
 
@@ -84,6 +84,8 @@ type dashData struct {
 	FractionPct   float64
 	StatusClass   string
 	StatusText    string
+	BypassClass   string
+	BypassText    string
 	Bars          []barItem
 	ThresholdPx   float64
 	ShowThreshold bool
@@ -99,6 +101,7 @@ func buildDashData() dashData {
 		threshold                   float64
 		region                      string
 		window                      [10]float64
+		bypassOn, bypassPresent     bool
 	)
 
 	for _, mf := range mfs {
@@ -123,6 +126,14 @@ func buildDashData() dashData {
 						region = l.GetValue()
 					}
 				}
+			}
+		case "vpn_bypass_enabled":
+			if len(mf.GetMetric()) > 0 {
+				bypassOn = mf.GetMetric()[0].GetGauge().GetValue() == 1
+			}
+		case "vpn_bypass_rule_present":
+			if len(mf.GetMetric()) > 0 {
+				bypassPresent = mf.GetMetric()[0].GetGauge().GetValue() == 1
 			}
 		case "vpn_healthcheck_window_ms":
 			for _, m := range mf.GetMetric() {
@@ -188,6 +199,18 @@ func buildDashData() dashData {
 		statusClass, statusText = "yellow", "WARNING"
 	}
 
+	// A configured-but-missing bypass is the whole reason this is on the
+	// dashboard: marked traffic still flows, it just silently exits via the
+	// VPN. Show it in red rather than letting it look like "off".
+	bypassClass, bypassText := "muted", "OFF"
+	if bypassOn {
+		if bypassPresent {
+			bypassClass, bypassText = "green", "ACTIVE"
+		} else {
+			bypassClass, bypassText = "red", "MISSING"
+		}
+	}
+
 	return dashData{
 		Region:        region,
 		Baseline:      baseline,
@@ -196,6 +219,8 @@ func buildDashData() dashData {
 		FractionPct:   fraction * 100,
 		StatusClass:   statusClass,
 		StatusText:    statusText,
+		BypassClass:   bypassClass,
+		BypassText:    bypassText,
 		Bars:          bars,
 		ThresholdPx:   threshPx,
 		ShowThreshold: showThresh,
@@ -237,7 +262,7 @@ var dashTmpl = template.Must(template.New("dash").Funcs(template.FuncMap{
     .stat{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:.8rem;display:flex;flex-direction:column;gap:2px}
     .stat label{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em}
     .stat b{font-weight:600;font-size:.9rem}
-    .green{color:var(--green)}.yellow{color:var(--yellow)}.red{color:var(--red)}
+    .green{color:var(--green)}.yellow{color:var(--yellow)}.red{color:var(--red)}.muted{color:var(--muted)}
 
     /* chart */
     .chart-outer{position:relative;height:{{.ChartTotalPx}}px;padding-left:52px;padding-bottom:22px}
@@ -289,6 +314,7 @@ var dashTmpl = template.Must(template.New("dash").Funcs(template.FuncMap{
       <div class="stat"><label>Threshold</label><b>{{printf "%.0f" .Threshold}}ms</b></div>
       <div class="stat"><label>Latest</label><b>{{printf "%.0f" .Latency}}ms</b></div>
       <div class="stat"><label>Over threshold</label><b class="{{.StatusClass}}">{{printf "%.0f" .FractionPct}}% &mdash; {{.StatusText}}</b></div>
+      <div class="stat"><label>Split bypass</label><b class="{{.BypassClass}}">{{.BypassText}}</b></div>
     </div>
 
     <div class="chart-outer">
