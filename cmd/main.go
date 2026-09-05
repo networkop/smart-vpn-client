@@ -9,6 +9,7 @@ import (
 	"github.com/networkop/smart-vpn-client/pkg/health"
 	"github.com/networkop/smart-vpn-client/pkg/metrics"
 	"github.com/networkop/smart-vpn-client/pkg/vpn"
+	"github.com/networkop/smart-vpn-client/pkg/wg"
 
 	"github.com/sirupsen/logrus"
 
@@ -32,6 +33,8 @@ var (
 	metricsPort = flag.Int("metrics", 2112, "Port to expose /metrics on")
 	webPort     = flag.Int("web", 8080, "Port to serve the HTML dashboard on")
 	webIface    = flag.String("web-iface", "eth0", "Interface to bind the HTML dashboard to")
+	bypassMark  = flag.Int("bypass-mark", 0, "fwmark set by a companion proxy on traffic that must skip the tunnel, e.g. 0x51821 (0 disables)")
+	bypassTable = flag.Int("bypass-table", 51821, "routing table holding the native default route for bypassed traffic")
 	debug       = flag.Bool("debug", false, "enable debug logging")
 
 	supportedProviders = struct {
@@ -71,13 +74,23 @@ func Run(gitCommit string) error {
 	ignores := strings.Split(*ignoreVPNs, ",")
 	logrus.Infof("Ignored headends: %+v", ignores)
 
+	// Validate the split-tunnel bypass up front: a mark that collides with the
+	// discovery mark, or a table that collides with the WireGuard one, would
+	// misroute traffic silently rather than fail loudly.
+	bypass, err := wg.NewBypassConfig(*bypassMark, *bypassTable)
+	if err != nil {
+		return fmt.Errorf("Invalid split-tunnel bypass configuration: %s", err)
+	}
+	if bypass.Enabled() {
+		logrus.Infof("Split-tunnel bypass: fwmark 0x%x routed via table %d", bypass.Mark, bypass.Table)
+	}
+
 	var client vpn.Provider
-	var err error
 
 	switch *vpnProvider {
 	case supportedProviders.pia:
 		logrus.Info("VPN provider is PIA")
-		client, err = pia.NewClient(*vpnUser, secret, *latencyInt, *maxFail, ignores, *preferVPN)
+		client, err = pia.NewClient(*vpnUser, secret, *latencyInt, *maxFail, ignores, *preferVPN, bypass)
 	default:
 		flag.Usage()
 		return fmt.Errorf("Unsupported/Undefined VPN provider: %v", *vpnProvider)

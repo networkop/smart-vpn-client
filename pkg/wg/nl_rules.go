@@ -3,6 +3,8 @@ package wg
 import (
 	"fmt"
 
+	"github.com/networkop/smart-vpn-client/pkg/metrics"
+	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 
@@ -25,6 +27,15 @@ const (
 	// and WireGuard-endpoint bypass routes (/32) are still matched without the
 	// main default route competing with the VPN default route.
 	localRulePrio = 100
+	// bypassRulePrio is evaluated between localRulePrio and defaultRulePrio.
+	// It matches the configured bypass fwmark (see BypassConfig) and sends
+	// that traffic to the bypass table, which holds a default route via the
+	// native interface.
+	//
+	// Below localRulePrio so LAN destinations still resolve from the main
+	// table and never reach the bypass table at all; above defaultRulePrio so
+	// marked traffic beats the tunnel catch-all.
+	bypassRulePrio = 150
 	// defaultRulePrio steers all remaining traffic into the WireGuard table.
 	defaultRulePrio = 1000
 )
@@ -176,6 +187,130 @@ func (t *Tunnel) EnsureDiscoveryBypass() error {
 	return t.addDiscoveryRule()
 }
 
+// addBypassSrcRule installs:
+//
+//	ip rule add priority 150 fwmark <mark> lookup <table>
+//
+// Marked traffic is sent to the bypass table's default route via the native
+// interface, escaping the tunnel. No-op when the bypass is disabled.
+func (t *Tunnel) addBypassSrcRule() error {
+	if !t.bypass.Enabled() {
+		return nil
+	}
+	rule := netlink.NewRule()
+	rule.Priority = bypassRulePrio
+	rule.Mark = t.bypass.Mark
+	rule.Table = t.bypass.Table
+	if err := netlink.RuleAdd(rule); err != nil {
+		return fmt.Errorf("RuleAdd bypass: %w", err)
+	}
+	return nil
+}
+
+// delBypassSrcRule removes the bypass rule along with the default route in the
+// table it points at.
+//
+// Unlike its siblings this matches on priority alone rather than on the
+// configured mark and table. `-cleanup` is documented as needing no
+// configuration, so it runs without the bypass flags; matching strictly would
+// leave a rule installed by an earlier, fully-configured run behind, silently
+// diverting marked traffic long after the agent is gone. The rule itself
+// carries the table to flush.
+func (t *Tunnel) delBypassSrcRule() error {
+	rules, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return fmt.Errorf("RuleList bypass: %w", err)
+	}
+	for i, r := range rules {
+		if r.Priority != bypassRulePrio {
+			continue
+		}
+		table := r.Table
+		if err := netlink.RuleDel(&rules[i]); err != nil {
+			return fmt.Errorf("RuleDel bypass: %w", err)
+		}
+		t.delBypassTableRoute(table)
+	}
+	// The rule may already be gone while its table route lingers, so clean the
+	// configured table unconditionally.
+	t.delBypassTableRoute(t.bypass.Table)
+	metrics.BypassRulePresent.Set(0)
+	return nil
+}
+
+// getBypassSrcRule returns the bypass rule if it exists, nil otherwise.
+func (t *Tunnel) getBypassSrcRule() *netlink.Rule {
+	if !t.bypass.Enabled() {
+		return nil
+	}
+	rules, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return nil
+	}
+	for i, r := range rules {
+		if r.Priority == bypassRulePrio && r.Mark == t.bypass.Mark && r.Table == t.bypass.Table {
+			return &rules[i]
+		}
+	}
+	return nil
+}
+
+// ensureBypass idempotently installs both halves of the split-tunnel bypass:
+// the default route via the native interface in the bypass table, and the ip
+// rule that steers fwmark-tagged traffic into it. No-op when disabled.
+//
+// Failures are deliberately non-fatal — the tunnel is perfectly functional
+// without the bypass, and failing the connect would take the VPN down over a
+// secondary feature. They are logged at WARN rather than DEBUG and reflected
+// in vpn_bypass_rule_present, because the failure this feature exists to
+// prevent is a silent one: marked traffic keeps working, it just leaves via
+// the tunnel and gets masqueraded to the VPN exit address, with nothing in the
+// logs to say so.
+func (t *Tunnel) ensureBypass() {
+	if !t.bypass.Enabled() {
+		metrics.BypassRulePresent.Set(0)
+		return
+	}
+
+	if err := t.ensureBypassTableRoute(); err != nil {
+		logrus.Warnf("Bypass: failed to install default route in table %d: %s", t.bypass.Table, err)
+	}
+
+	if t.getBypassSrcRule() == nil {
+		if err := t.addBypassSrcRule(); err != nil {
+			logrus.Warnf("Bypass: failed to install ip rule at priority %d: %s", bypassRulePrio, err)
+		}
+	}
+
+	if !t.refreshBypassState() {
+		logrus.Warnf("Bypass: fwmark 0x%x is configured but the ip rule or the table %d default route is missing; "+
+			"traffic marked by the companion proxy will leave through the tunnel and be masqueraded to the VPN exit address",
+			t.bypass.Mark, t.bypass.Table)
+		return
+	}
+
+	logrus.Infof("Bypass: fwmark 0x%x is routed via table %d (ip rule priority %d)",
+		t.bypass.Mark, t.bypass.Table, bypassRulePrio)
+}
+
+// refreshBypassState updates vpn_bypass_rule_present and reports whether both
+// halves of the bypass are in place. A rule without a route (or vice versa)
+// does not divert anything, so both are required for the gauge to read 1.
+func (t *Tunnel) refreshBypassState() bool {
+	if !t.bypass.Enabled() {
+		metrics.BypassRulePresent.Set(0)
+		return false
+	}
+
+	present := t.getBypassSrcRule() != nil && t.getBypassTableRoute() != nil
+	if present {
+		metrics.BypassRulePresent.Set(1)
+	} else {
+		metrics.BypassRulePresent.Set(0)
+	}
+	return present
+}
+
 // ensureRules idempotently installs all ip rules. Safe to call on reconnect.
 func (t *Tunnel) ensureRules() error {
 	if t.getLocalRule() == nil {
@@ -188,7 +323,11 @@ func (t *Tunnel) ensureRules() error {
 			return err
 		}
 	}
-	return t.EnsureDiscoveryBypass()
+	if err := t.EnsureDiscoveryBypass(); err != nil {
+		return err
+	}
+	t.ensureBypass()
+	return nil
 }
 
 // delRules removes all ip rules. Called during Cleanup.
@@ -197,6 +336,9 @@ func (t *Tunnel) delRules() error {
 		return err
 	}
 	if err := t.delDefaultRule(); err != nil {
+		return err
+	}
+	if err := t.delBypassSrcRule(); err != nil {
 		return err
 	}
 	return t.delDiscoveryRule()

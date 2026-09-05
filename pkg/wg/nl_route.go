@@ -79,6 +79,13 @@ func (t *Tunnel) addBypassRoute() error {
 	}
 	current := routes[0]
 
+	// Capture the native path while we have it: this lookup happens before the
+	// tunnel default route is installed, so it describes how the host reaches
+	// the internet without the VPN. ensureBypassTableRoute reuses it rather
+	// than repeating the discovery.
+	t.nativeGw = current.Gw
+	t.nativeLink = current.LinkIndex
+
 	bypass := &netlink.Route{
 		Dst:       &net.IPNet{IP: t.endpoint, Mask: net.CIDRMask(32, 32)},
 		Gw:        current.Gw,
@@ -101,6 +108,121 @@ func (t *Tunnel) delBypassRoute() {
 	dst := &net.IPNet{IP: t.endpoint, Mask: net.CIDRMask(32, 32)}
 	if err := netlink.RouteDel(&netlink.Route{Dst: dst}); err != nil {
 		logrus.Debugf("delBypassRoute(%s): %s", t.endpoint, err)
+	}
+}
+
+// nativeDefault returns the gateway and interface index of the native
+// (non-tunnel) default path.
+//
+// addBypassRoute captures this while installing the WireGuard endpoint's /32
+// bypass, which runs before the tunnel default route exists, so the captured
+// value is the pre-tunnel path. When that capture has not run — or failed —
+// fall back to reading the main table's default route directly: this agent
+// never touches the main table's default route, so it still describes the
+// native path.
+func (t *Tunnel) nativeDefault() (net.IP, int, error) {
+	if t.nativeLink != 0 {
+		return t.nativeGw, t.nativeLink, nil
+	}
+
+	routes, err := netlink.RouteListFiltered(
+		netlink.FAMILY_V4,
+		&netlink.Route{Table: mainRouteTable},
+		netlink.RT_FILTER_TABLE,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing main table routes: %w", err)
+	}
+
+	for _, r := range routes {
+		if r.Dst != nil && r.Dst.String() != "0.0.0.0/0" {
+			continue
+		}
+		if r.LinkIndex == 0 {
+			continue
+		}
+		// Defensive: never treat the tunnel itself as the native path.
+		if t.link != nil && r.LinkIndex == t.link.Attrs().Index {
+			continue
+		}
+		return r.Gw, r.LinkIndex, nil
+	}
+
+	return nil, 0, fmt.Errorf("no default route in the main table")
+}
+
+// ensureBypassTableRoute installs, in the bypass table:
+//
+//	ip route replace default via <native gw> dev <native iface> table <table>
+//
+// RouteReplace rather than RouteAdd so reconnects (and a changed ISP gateway)
+// are handled without an EEXIST dance.
+func (t *Tunnel) ensureBypassTableRoute() error {
+	if !t.bypass.Enabled() {
+		return nil
+	}
+
+	gw, linkIndex, err := t.nativeDefault()
+	if err != nil {
+		return err
+	}
+
+	route := &netlink.Route{
+		Dst:       &defaultIPv4Net,
+		Gw:        gw,
+		LinkIndex: linkIndex,
+		Table:     t.bypass.Table,
+	}
+	if gw == nil {
+		// An on-link default route (no gateway) has to be link-scoped or the
+		// kernel rejects it.
+		route.Scope = netlink.SCOPE_LINK
+	}
+
+	if err := netlink.RouteReplace(route); err != nil {
+		return fmt.Errorf("RouteReplace bypass default (table %d): %w", t.bypass.Table, err)
+	}
+	logrus.Debugf("Bypass: default route via %s (link %d) installed in table %d", gw, linkIndex, t.bypass.Table)
+	return nil
+}
+
+// getBypassTableRoute returns the bypass table's default route, nil otherwise.
+func (t *Tunnel) getBypassTableRoute() *netlink.Route {
+	if !t.bypass.Enabled() {
+		return nil
+	}
+	routes, err := netlink.RouteListFiltered(
+		netlink.FAMILY_V4,
+		&netlink.Route{Table: t.bypass.Table},
+		netlink.RT_FILTER_TABLE,
+	)
+	if err != nil {
+		return nil
+	}
+	for i, r := range routes {
+		if r.Dst == nil || r.Dst.String() == "0.0.0.0/0" {
+			return &routes[i]
+		}
+	}
+	return nil
+}
+
+// delBypassTableRoute removes the default route from the given bypass table.
+// Takes the table explicitly because cleanup may learn it from the installed
+// rule rather than from configuration.
+func (t *Tunnel) delBypassTableRoute(table int) {
+	if table == 0 {
+		return
+	}
+	if _, reserved := reservedTables[table]; reserved {
+		// Belt and braces: NewBypassConfig rejects these, but this function is
+		// also handed a table read back from the kernel.
+		logrus.Warnf("Bypass: refusing to remove the default route from reserved table %d", table)
+		return
+	}
+	route := &netlink.Route{Dst: &defaultIPv4Net, Table: table}
+	if err := netlink.RouteDel(route); err != nil {
+		logrus.Debugf("delBypassTableRoute(table %d): %s", table, err)
 	}
 }
 

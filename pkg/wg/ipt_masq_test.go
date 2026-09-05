@@ -9,7 +9,7 @@ func TestIPtables(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("skipping iptables tests when not running as root")
 	}
-	wg, err := New()
+	wg, err := New(BypassConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
