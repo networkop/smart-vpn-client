@@ -173,6 +173,8 @@ Priority 150 is deliberate: below the `suppress_prefixlength` rule so LAN destin
 
 The gateway and interface are taken from the main table's default route, so the bypass follows the native path rather than a hardcoded one. The rule and route are reinstalled idempotently on every reconnect, and both are removed by `-cleanup`.
 
+Priority 150 may be shared with other components. Cleanup only touches rules that point at `-bypass-table`, and only ever flushes that table, so a rule installed by something else at the same priority — pointing at a table this client does not manage — is left alone. `-cleanup` runs without `-bypass-mark`, so it still removes a rule left by an earlier configured run; if that run used a non-default `-bypass-table`, pass the same `-bypass-table` to `-cleanup`.
+
 **Observability.** Without the rule, marked traffic still works — it just goes through the tunnel and gets masqueraded to the VPN exit address, with nothing to show for it. Two gauges make that state visible:
 
 | Metric | Meaning |

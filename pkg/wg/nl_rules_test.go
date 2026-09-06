@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 // Test-only bypass settings. Deliberately not the documented defaults
@@ -255,5 +256,173 @@ func TestNewBypassConfig(t *testing.T) {
 				t.Fatalf("Enabled() = %v, want %v", cfg.Enabled(), tt.wantEnabled)
 			}
 		})
+	}
+}
+
+// Test-only stand-in for a rule owned by another component (envoy-split-proxy
+// installs `150: from all fwmark 0x51821 lookup 200`). Same priority as ours,
+// different mark and, crucially, a different table.
+const (
+	foreignBypassMark  = 0x51897
+	foreignBypassTable = 51897
+)
+
+// countRulesAtPrioTable returns how many ip rules sit at the given priority and
+// point at the given table.
+func countRulesAtPrioTable(t *testing.T, prio, table int) int {
+	t.Helper()
+	rules, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		t.Fatalf("RuleList: %v", err)
+	}
+	var n int
+	for _, r := range rules {
+		if r.Priority == prio && r.Table == table {
+			n++
+		}
+	}
+	return n
+}
+
+// addForeignBypassRule installs a rule at bypassRulePrio pointing at a table
+// this agent does not manage, plus a blackhole default route in that table, and
+// removes both when the test ends. A blackhole route needs no link or gateway,
+// so it works on any host.
+func addForeignBypassRule(t *testing.T) {
+	t.Helper()
+
+	rule := netlink.NewRule()
+	rule.Priority = bypassRulePrio
+	rule.Mark = foreignBypassMark
+	rule.Table = foreignBypassTable
+	if err := netlink.RuleAdd(rule); err != nil {
+		t.Fatalf("RuleAdd foreign: %v", err)
+	}
+	t.Cleanup(func() { _ = netlink.RuleDel(rule) })
+
+	route := &netlink.Route{
+		Dst:   &defaultIPv4Net,
+		Table: foreignBypassTable,
+		Type:  unix.RTN_BLACKHOLE,
+	}
+	if err := netlink.RouteReplace(route); err != nil {
+		t.Fatalf("RouteReplace foreign: %v", err)
+	}
+	t.Cleanup(func() { _ = netlink.RouteDel(route) })
+}
+
+// foreignBypassRoutePresent reports whether the foreign table still holds a
+// route. delBypassSrcRule must never flush a table it does not own.
+func foreignBypassRoutePresent(t *testing.T) bool {
+	t.Helper()
+	routes, err := netlink.RouteListFiltered(
+		netlink.FAMILY_V4,
+		&netlink.Route{Table: foreignBypassTable},
+		netlink.RT_FILTER_TABLE,
+	)
+	if err != nil {
+		t.Fatalf("RouteListFiltered: %v", err)
+	}
+	return len(routes) > 0
+}
+
+// TestBypassRuleOwnership is the regression test for the collision that made
+// this agent delete envoy-split-proxy's rule (and flush its table) on startup:
+// deletion must match on the agent's own bypass table, not on priority alone.
+func TestBypassRuleOwnership(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("skipping netlink rule tests when not running as root")
+	}
+
+	addForeignBypassRule(t)
+
+	wg, err := New(testBypassConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wg.intfName = "wg-package-test"
+
+	delAll := func() {
+		_ = wg.delLocalRule()
+		_ = wg.delDefaultRule()
+		_ = wg.delDiscoveryRule()
+		_ = wg.delBypassSrcRule()
+	}
+	delAll()
+	t.Cleanup(delAll)
+
+	// The foreign rule must survive the teardown that runs before every
+	// Connect, as well as the one at the top of this test.
+	if got := countRulesAtPrioTable(t, bypassRulePrio, foreignBypassTable); got != 1 {
+		t.Fatalf("foreign rule removed by teardown: got %d rules for table %d, want 1", got, foreignBypassTable)
+	}
+
+	if err := wg.addBypassSrcRule(); err != nil {
+		t.Fatalf("addBypassSrcRule: %v", err)
+	}
+	if wg.getBypassSrcRule() == nil {
+		t.Fatal("own bypass rule not installed")
+	}
+
+	if err := wg.delRules(); err != nil {
+		t.Fatalf("delRules: %v", err)
+	}
+	if got := countRulesAtPrioTable(t, bypassRulePrio, testBypassTable); got != 0 {
+		t.Fatalf("after delRules: got %d own rules at priority %d, want 0", got, bypassRulePrio)
+	}
+	if got := countRulesAtPrioTable(t, bypassRulePrio, foreignBypassTable); got != 1 {
+		t.Fatalf("after delRules: got %d foreign rules for table %d, want 1", got, foreignBypassTable)
+	}
+	if !foreignBypassRoutePresent(t) {
+		t.Fatalf("after delRules: table %d was flushed", foreignBypassTable)
+	}
+}
+
+// TestBypassCleanupWithoutFlags covers `-cleanup`, which runs without the
+// bypass flags: the mark is unset but the table keeps its default, so a rule
+// left by an earlier configured run is still removed while a foreign rule at
+// the same priority is left alone.
+func TestBypassCleanupWithoutFlags(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("skipping netlink rule tests when not running as root")
+	}
+
+	addForeignBypassRule(t)
+
+	configured, err := New(testBypassConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = configured.delBypassSrcRule()
+	t.Cleanup(func() { _ = configured.delBypassSrcRule() })
+
+	if err := configured.addBypassSrcRule(); err != nil {
+		t.Fatalf("addBypassSrcRule: %v", err)
+	}
+
+	// What `-cleanup` builds: mark 0 (flag absent), table still defaulted.
+	cleanupCfg, err := NewBypassConfig(0, testBypassTable)
+	if err != nil {
+		t.Fatalf("NewBypassConfig: %v", err)
+	}
+	if cleanupCfg.Enabled() {
+		t.Fatal("cleanup config should report the bypass as disabled")
+	}
+	cleanup, err := New(cleanupCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanup.delBypassSrcRule(); err != nil {
+		t.Fatalf("delBypassSrcRule: %v", err)
+	}
+	if got := countRulesAtPrioTable(t, bypassRulePrio, testBypassTable); got != 0 {
+		t.Fatalf("cleanup left %d rules for table %d, want 0", got, testBypassTable)
+	}
+	if got := countRulesAtPrioTable(t, bypassRulePrio, foreignBypassTable); got != 1 {
+		t.Fatalf("cleanup removed the foreign rule: got %d for table %d, want 1", got, foreignBypassTable)
+	}
+	if !foreignBypassRoutePresent(t) {
+		t.Fatalf("cleanup flushed table %d", foreignBypassTable)
 	}
 }

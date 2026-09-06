@@ -208,33 +208,44 @@ func (t *Tunnel) addBypassSrcRule() error {
 }
 
 // delBypassSrcRule removes the bypass rule along with the default route in the
-// table it points at.
+// bypass table.
 //
-// Unlike its siblings this matches on priority alone rather than on the
-// configured mark and table. `-cleanup` is documented as needing no
-// configuration, so it runs without the bypass flags; matching strictly would
-// leave a rule installed by an earlier, fully-configured run behind, silently
-// diverting marked traffic long after the agent is gone. The rule itself
-// carries the table to flush.
+// Unlike its siblings this ignores the configured mark and matches on priority
+// and table alone. `-cleanup` is documented as needing no configuration, so it
+// runs without the bypass flags; matching on the mark would leave a rule
+// installed by an earlier, fully-configured run behind, silently diverting
+// marked traffic long after the agent is gone.
+//
+// The table is *not* taken from the rule we find, though, because priority 150
+// is shared property: envoy-split-proxy installs its own
+// `150: from all fwmark 0x51821 lookup 200` at boot, and an earlier version of
+// this function deleted it — plus flushed table 200 — the first time this agent
+// started, leaving the split proxy inert with nothing in either log to say why.
+// Only rules pointing at the table this agent manages (t.bypass.Table, which
+// keeps its default even when the mark is unset) are ours to remove.
 func (t *Tunnel) delBypassSrcRule() error {
+	metrics.BypassRulePresent.Set(0)
+	if t.bypass.Table == 0 {
+		// No table to own, so nothing at bypassRulePrio can be attributed to
+		// this agent. Only reachable via a hand-built zero BypassConfig;
+		// NewBypassConfig always populates Table.
+		return nil
+	}
 	rules, err := netlink.RuleList(netlink.FAMILY_V4)
 	if err != nil {
 		return fmt.Errorf("RuleList bypass: %w", err)
 	}
 	for i, r := range rules {
-		if r.Priority != bypassRulePrio {
+		if r.Priority != bypassRulePrio || r.Table != t.bypass.Table {
 			continue
 		}
-		table := r.Table
 		if err := netlink.RuleDel(&rules[i]); err != nil {
 			return fmt.Errorf("RuleDel bypass: %w", err)
 		}
-		t.delBypassTableRoute(table)
 	}
 	// The rule may already be gone while its table route lingers, so clean the
 	// configured table unconditionally.
 	t.delBypassTableRoute(t.bypass.Table)
-	metrics.BypassRulePresent.Set(0)
 	return nil
 }
 

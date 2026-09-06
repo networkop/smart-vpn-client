@@ -145,9 +145,14 @@ format breaks. Bump them together and confirm `make lint` locally first.
   on the dashboard. Keep all three when changing that code. Its failures are
   non-fatal by design: the tunnel is fine without the bypass, and failing the
   connect over a secondary feature would take the VPN down.
-* **`delBypassSrcRule` matches on priority alone**, unlike the other rule
-  deleters, because `-cleanup` runs without the bypass flags and would
-  otherwise strand a rule from an earlier configured run.
+* **`delBypassSrcRule` matches on priority *and table*, ignoring the mark**,
+  unlike the other rule deleters. The mark is ignored because `-cleanup` runs
+  without the bypass flags and matching strictly would strand a rule from an
+  earlier configured run. The table is checked because priority 150 is shared
+  with `envoy-split-proxy`, which installs its own rule there pointing at its
+  own table; matching on priority alone deleted that rule and flushed its
+  table. Only ever delete routes in `t.bypass.Table`, never in a table read
+  back from a rule you found.
 * **Health tuning constants** live at the top of `pkg/health/health.go`
   (`baselineSamples`, `windowSize`, `degradationFactor`, `degradationQuorum`,
   `minSamples`). The baseline is a median of samples and degradation requires a
