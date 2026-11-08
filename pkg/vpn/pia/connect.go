@@ -1,13 +1,14 @@
 package pia
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"time"
@@ -17,7 +18,14 @@ import (
 )
 
 const (
-	tokenURL  = "https://%s/authv3/generateToken"
+	// tokenURL is PIA's central token API, the one its manual-connections
+	// scripts use. Tokens used to come from each region's meta server
+	// (https://<meta>/authv3/generateToken), but most meta servers now present
+	// certificates from "ExpressVPN CA3" that fail verification against the PIA
+	// CA, while the same regions' WireGuard API on :1337 still verifies. This
+	// endpoint has a publicly-trusted certificate and also means credentials go
+	// to one host rather than to whichever region wins the election.
+	tokenURL  = "https://www.privateinternetaccess.com/api/client/v2/token"
 	addKeyURL = "https://%s:1337/addKey"
 )
 
@@ -30,30 +38,45 @@ type wgServerConf struct {
 	RemoteIP  string `json:"server_ip,omitempty"`
 }
 
-type authV3 struct {
-	Status string `json:"status,omitempty"`
-	Token  string `json:"token,omitempty"`
+type tokenResponse struct {
+	Token string `json:"token,omitempty"`
 }
 
 // Connect to PIA VPN headend
 func (c *Client) Connect() error {
+	serverConf, err := c.negotiate()
+	if err != nil {
+		return err
+	}
+	return c.bringUp(serverConf)
+}
+
+// negotiate asks the winning headend for its tunnel parameters. It changes
+// nothing on the host, so re-election can run it while the current tunnel is
+// still carrying traffic and abandon the switch if the headend is unusable.
+func (c *Client) negotiate() (*wgServerConf, error) {
 
 	logrus.Debugf("Connecting to %s", c.winner.ID)
 
-	token, err := c.genToken(*c.winner)
+	token, err := c.genToken()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logrus.Debugf("Generated token %s", token)
 
 	serverConf, err := c.genServer(*c.winner, token, c.wg.PrivateKey.PublicKey())
 	if err != nil {
-		return fmt.Errorf("Failed to get wg server configuration: %s", err)
+		return nil, fmt.Errorf("Failed to get wg server configuration: %s", err)
 	}
 
+	return serverConf, nil
+}
+
+// bringUp configures the local tunnel using parameters from negotiate.
+func (c *Client) bringUp(serverConf *wgServerConf) error {
 	remoteURL := fmt.Sprintf("%s:%d", serverConf.RemoteIP, serverConf.Port)
 
-	err = c.wg.Up(remoteURL, serverConf.Key, serverConf.PeerIP)
+	err := c.wg.Up(remoteURL, serverConf.Key, serverConf.PeerIP)
 	if err != nil {
 		return fmt.Errorf("Failed to bring up wireguard tunnel: %s", err)
 	}
@@ -157,36 +180,39 @@ func (c *Client) buildPIAHTTPClient(remote string, serverName string) *http.Clie
 	}
 }
 
-func (c *Client) buildPIAGetRequest(url string) (*http.Request, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(c.user+":"+c.pwd)))
-	return req, nil
+// genToken uses discoverClient so the token request is reused over one
+// long-lived client and, like discovery, leaves via the native interface even
+// if the tunnel is up but black-holing traffic.
+func (c *Client) genToken() (string, error) {
+	return c.requestToken(discoverClient, tokenURL)
 }
 
-func (c *Client) genToken(r region) (string, error) {
-	metaSever := r.Servers.Meta[0]
-	url := fmt.Sprintf(tokenURL, metaSever.CN)
+func (c *Client) requestToken(client *http.Client, url string) (string, error) {
 	logrus.Debugf("Retrieving token from %s", url)
 
-	client := c.buildPIAHTTPClient(fmt.Sprintf("%s:443", metaSever.IP), metaSever.CN)
+	var form bytes.Buffer
+	w := multipart.NewWriter(&form)
+	if err := w.WriteField("username", c.user); err != nil {
+		return "", err
+	}
+	if err := w.WriteField("password", c.pwd); err != nil {
+		return "", err
+	}
+	if err := w.Close(); err != nil {
+		return "", err
+	}
 
-	req, err := c.buildPIAGetRequest(url)
+	req, err := http.NewRequest(http.MethodPost, url, &form)
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
-
-	if resp.Body != nil {
-		defer resp.Body.Close()
-	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("token request failed: HTTP %d", resp.StatusCode)
@@ -197,18 +223,16 @@ func (c *Client) genToken(r region) (string, error) {
 		return "", err
 	}
 
-	payload := authV3{}
-	err = json.Unmarshal(body, &payload)
-	if err != nil {
+	payload := tokenResponse{}
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", fmt.Errorf("failed to parse token response: %w", err)
 	}
 
-	if payload.Status != "OK" {
-		return "", fmt.Errorf("failed to retrieve token: status %q", payload.Status)
+	if payload.Token == "" {
+		return "", fmt.Errorf("token response did not contain a token")
 	}
 
 	return payload.Token, nil
-
 }
 
 func (c *Client) genServer(r region, token string, pubKey wgtypes.Key) (*wgServerConf, error) {
@@ -218,7 +242,8 @@ func (c *Client) genServer(r region, token string, pubKey wgtypes.Key) (*wgServe
 
 	client := c.buildPIAHTTPClient(fmt.Sprintf("%s:1337", wgServer.IP), wgServer.CN)
 
-	req, err := c.buildPIAGetRequest(url)
+	// Authenticated by the pt token alone; the user's password is not sent here.
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}

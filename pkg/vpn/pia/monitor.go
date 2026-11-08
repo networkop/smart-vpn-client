@@ -111,10 +111,11 @@ func (c *Client) reelectNext(out chan string) {
 	}
 	c.Measure()
 
+	current := c.winner
 	excludeID := ""
-	if c.winner != nil {
-		excludeID = c.winner.ID
-		logrus.Infof("Re-election: excluding current headend %s", c.winner.displayName())
+	if current != nil {
+		excludeID = current.ID
+		logrus.Infof("Re-election: excluding current headend %s", current.displayName())
 	}
 
 	if !c.bestHeadend(excludeID) {
@@ -122,11 +123,23 @@ func (c *Client) reelectNext(out chan string) {
 		return
 	}
 
+	// Negotiate before tearing anything down. Cleanup used to run first, so
+	// every headend that refused us cost a full outage until the next health
+	// cycle reconnected. addKey travels over the current tunnel; if that
+	// tunnel is dead it fails here and the health checker handles it.
 	logrus.Infof("Re-election: switching to %s", c.winner.displayName())
+	serverConf, err := c.negotiate()
+	if err != nil {
+		logrus.Infof("Re-election: %s unavailable, keeping current headend: %s", c.winner.displayName(), err)
+		c.failedRegions[c.winner.ID] = time.Now()
+		c.winner = current
+		return
+	}
+
 	if err := c.Cleanup(); err != nil {
 		logrus.Panicf("Re-election cleanup failed: %s", err)
 	}
-	if err := c.Connect(); err != nil {
+	if err := c.bringUp(serverConf); err != nil {
 		logrus.Infof("Re-election connect failed: %s", err)
 		c.failedRegions[c.winner.ID] = time.Now()
 		// Clear the winner so the next health cycle triggers full rediscovery

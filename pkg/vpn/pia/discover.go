@@ -50,8 +50,7 @@ func (r *region) displayName() string {
 }
 
 type piaServerInfo struct {
-	WG   []piaServer `json:"wg,omitempty"`
-	Meta []piaServer `json:"meta,omitempty"`
+	WG []piaServer `json:"wg,omitempty"`
 }
 
 type piaServer struct {
